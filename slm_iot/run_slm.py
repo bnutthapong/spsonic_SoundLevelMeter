@@ -5,7 +5,7 @@ from datetime import datetime
 import RPi.GPIO as GPIO
 import serial
 
-from src.slm_meter import soundmeter as start_meter
+from src.slm_meter import monitor_microphone as start_meter
 from src.slm_meter import initilize_serialRS485
 from src.slm_calibrate import calibrate_with_1khz_tone
 from src.slm_logger import setup_logging
@@ -58,7 +58,7 @@ if __name__ == "__main__":
                 if pressed_time is None:
                     pressed_time = time.time()
                 elif time.time() - pressed_time >= 3:
-                    logger.info("Switch 1 held for 3 seconds — Starting calibration...")
+                    logger.info("Switch 1 held for 3 seconds - Starting calibration...")
 
                     slm_process.terminate()
                     slm_process.join()

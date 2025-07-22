@@ -32,7 +32,7 @@ def calibrate_with_1khz_tone():
     global CALIBRATION_GAIN_1KHZ, ACTIVE_CALIBRATION_GAIN
     print("Calibrating with 1 kHz tone at 94 dB... Speak now.")
     
-    splA = (':10000\r').encode()  # Ensure message ends with CRLF
+    splA = (':1CAL\r').encode()  # Ensure message ends with CRLF
     ser_new.write(splA)
     
     duration = 3
