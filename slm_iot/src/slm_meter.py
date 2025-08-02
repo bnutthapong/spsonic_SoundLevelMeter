@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 # Constants
 REF_PRESSURE = 20e-6  # Reference pressure in pascals
 LEQ_INTERVAL = 60     # Seconds (can be configured)
-SAMPLE_RATE = 44100
-CHUNK_SIZE = 1024
+SAMPLE_RATE = 48000
+CHUNK_SIZE = 2048
 TIME_WEIGHTING = "slow"  # Options: "fast", "slow", "none"
 
 ACTIVE_CALIBRATION_GAIN = 1.0
@@ -26,7 +26,6 @@ error_threshold = 10  # Number of consecutive silent or bad frames before abort
 
 
 def load_active_calibration_gain():
-    """Load ACTIVE_CALIBRATION_GAIN from calibration_results.json in config folder."""
     config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'calibration_results.json')
     config_path = os.path.abspath(config_path)
     if os.path.exists(config_path):
@@ -77,12 +76,12 @@ def get_alpha(time_constant, block_duration):
 
 def initilize_serialRS485():
     ser = serial.Serial(
-        port='/dev/ttyS0',  # Change this to your USB-to-RS485 converter's port
+        port='/dev/ttyS0',
         baudrate=9600,
         parity=serial.PARITY_NONE,
         stopbits=serial.STOPBITS_ONE,
         bytesize=serial.EIGHTBITS,
-        timeout=1  # Timeout in seconds
+        timeout=1
     )
     return ser
 
@@ -155,7 +154,6 @@ def soundmeter():
 
         audio_data = indata[:, 0] * ACTIVE_CALIBRATION_GAIN
         block_rms = process_block(audio_data, b_coeffs, a_coeffs)
-        # Apply time-weighting to squared RMS (energy)
         energy = block_rms ** 2
 
         energy = alpha * energy + (1 - alpha) * smoothed_energy
@@ -177,7 +175,7 @@ def soundmeter():
             elif value < 1000.0:
                 value += 10000.0
 
-            spl_dBA = (':' + str(value) + '\r').encode()  # Ensure message ends with CRLF
+            spl_dBA = (':' + str(value) + '\r').encode()
             q.put(spl_dBA)
             last_print_time = now
 

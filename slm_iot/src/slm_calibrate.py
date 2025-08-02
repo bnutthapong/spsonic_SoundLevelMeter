@@ -40,7 +40,7 @@ def calibrate_with_1khz_tone():
     sd.wait()
     b_coeffs, a_coeffs = A_weighting(SAMPLE_RATE)
     measured_rms = process_block(recording[:, 0], b_coeffs, a_coeffs)
-    target_rms = REF_PRESSURE * 10 ** (94 / 20)
+    target_rms = REF_PRESSURE * 10 ** (93.9 / 20)
     CALIBRATION_GAIN_1KHZ = target_rms / measured_rms
     ACTIVE_CALIBRATION_GAIN = CALIBRATION_GAIN_1KHZ
     print(f"Calibration complete. Gain set to {CALIBRATION_GAIN_1KHZ:.4f}")
