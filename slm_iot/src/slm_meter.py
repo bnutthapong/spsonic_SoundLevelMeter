@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 REF_PRESSURE = 20e-6  # Reference pressure in pascals
 LEQ_INTERVAL = 60     # Seconds (can be configured)
 SAMPLE_RATE = 48000
-CHUNK_SIZE = 2048
-TIME_WEIGHTING = "slow"  # Options: "fast", "slow", "none"
+CHUNK_SIZE = 1024
+TIME_WEIGHTING = "fast"  # Options: "fast", "slow", "none"
 
-ACTIVE_CALIBRATION_GAIN = 1.0
+ACTIVE_CALIBRATION_GAIN = 25.0000  # Default calibration gain for microphone UMIK-2
 
 error_counter = 0
 silent_frame_counter = 0
@@ -26,7 +26,7 @@ error_threshold = 10  # Number of consecutive silent or bad frames before abort
 
 
 def load_active_calibration_gain():
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'calibration_results.json')
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'mic_calibration.json')
     config_path = os.path.abspath(config_path)
     if os.path.exists(config_path):
         with open(config_path, 'r') as f:
@@ -41,7 +41,7 @@ def A_weighting(fs):
     f2 = 107.65265
     f3 = 737.86223
     f4 = 12194.217
-    A1000 = 1.9997
+    A1000 = 1.9997 # dB gain at 1000 Hz
 
     NUMs = [(2 * np.pi * f4) ** 2 * (10 ** (A1000 / 20)), 0, 0, 0, 0]
     DENs = np.convolve([1, 4 * np.pi * f4, (2 * np.pi * f4) ** 2],
@@ -50,6 +50,28 @@ def A_weighting(fs):
                        [1, 2 * np.pi * f2])
 
     b_coeffs, a_coeffs = bilinear(NUMs, DENs, fs)
+    return b_coeffs, a_coeffs
+
+
+def C_weighting(fs):
+    """Return digital C-weighting filter coefficients (numerator, denominator) for sampling rate fs."""
+    f1 = 20.598997
+    f4 = 12194.217
+    C1000 = 0.0619  # dB gain at 1000 Hz
+
+    NUMs = [(2 * np.pi * f4) ** 2 * (10 ** (C1000 / 20)), 0, 0]
+    DENs = np.convolve([1, 4 * np.pi * f4, (2 * np.pi * f4) ** 2],
+                       [1, 4 * np.pi * f1, (2 * np.pi * f1) ** 2])
+
+    b_coeffs, a_coeffs = bilinear(NUMs, DENs, fs)
+    return b_coeffs, a_coeffs
+
+
+def Z_weighting(fs):
+    """Return digital Z-weighting filter coefficients (numerator, denominator) for sampling rate fs."""
+    # Flat response: gain of 1 across all frequencies
+    b_coeffs = [1.0]
+    a_coeffs = [1.0]
     return b_coeffs, a_coeffs
 
 
@@ -74,9 +96,9 @@ def get_alpha(time_constant, block_duration):
     return 1 - np.exp(-block_duration / time_constant)
 
 
-def initilize_serialRS485():
+def initilize_serialport():
     ser = serial.Serial(
-        port='/dev/ttyS0',
+        port='/dev/ttyS0', # ttyS0, ttyUSB0
         baudrate=9600,
         parity=serial.PARITY_NONE,
         stopbits=serial.STOPBITS_ONE,
@@ -86,14 +108,13 @@ def initilize_serialRS485():
     return ser
 
 
-def monitor_microphone():
+def monitor_microphone(time_weighting_value=None, rs232_or_rs485=None):
     while True:
         try:
             logger.info("Attempting to initialize microphone...")
             sd._terminate()
             sd._initialize()
             time.sleep(2)
-
             input_devices = [d for d in sd.query_devices() if d['max_input_channels'] > 0]
             if not input_devices:
                 raise sd.PortAudioError("No input device available")
@@ -101,7 +122,8 @@ def monitor_microphone():
             sd.default.device = input_devices[0]['name']
             logger.info(f"Using input device: {sd.default.device}")
 
-            for spl in soundmeter():
+            # Now send SPL values as normal
+            for spl in soundmeter(time_weighting_value, rs232_or_rs485):
                 yield spl
 
         except (sd.PortAudioError, sd.CallbackAbort, OSError) as e:
@@ -111,10 +133,10 @@ def monitor_microphone():
             time.sleep(5)
 
 
-def soundmeter():
+def soundmeter(time_weighting_value=None, rs232_or_rs485=None):
     global ACTIVE_CALIBRATION_GAIN, error_counter, silent_frame_counter
     ACTIVE_CALIBRATION_GAIN = load_active_calibration_gain()
-    logger.info("Starting Sound Level Meter...")
+    logger.info("Starting Sound Level Meter (SLM) ...")
 
     b_coeffs, a_coeffs = A_weighting(SAMPLE_RATE)
     leq_buf = []
@@ -123,7 +145,13 @@ def soundmeter():
 
     block_duration = CHUNK_SIZE / SAMPLE_RATE
     smoothed_energy = 0.0
-    alpha = get_alpha(1.0 if TIME_WEIGHTING == "slow" else 0.125, block_duration)
+
+    if time_weighting_value is not None:
+        current_weighting = time_weighting_value.value
+    else:
+        current_weighting = TIME_WEIGHTING
+
+    alpha = get_alpha(1.0 if current_weighting == "slow" else 0.125, block_duration)
     print_interval = 0.5
     last_print_time = time.time()
 
@@ -168,16 +196,28 @@ def soundmeter():
             timestamp = time.strftime('%H:%M:%S')
             # print(f"{timestamp} | Current SPL ({TIME_WEIGHTING.title()}): {block_spl:.1f} dBA")
             value = round(block_spl, 1)
-            if value < 10.0:
-                value += 100.0
-            elif value < 100.0:
-                value += 100.0
-            elif value < 1000.0:
-                value += 10000.0
 
-            spl_dBA = (':' + str(value) + '\r').encode()
+            if rs232_or_rs485.value == "rs232":
+                if value < 10:
+                    value = "S00" + str(value) + "\r\n"
+                elif value > 100 :
+                    value = "S" + str(value) + "\r\n"
+                else:
+                    value = "S0" + str(value) + "\r\n"
+                spl_dBA = value.encode()
+            else:
+                if value < 10.0:
+                    value += 100.0
+                elif value < 100.0:
+                    value += 100.0
+                elif value < 1000.0:
+                    value += 10000.0
+                spl_dBA = (':' + str(value) + '\r').encode()
+            
             q.put(spl_dBA)
             last_print_time = now
+            
+            #print(f"{timestamp} |{current_rs232_or_rs485}| Current SPL ({current_weighting.title()}): {spl_dBA} dBA")
 
         if now - interval_start >= LEQ_INTERVAL:
             timestamp = time.strftime('%H:%M:%S')

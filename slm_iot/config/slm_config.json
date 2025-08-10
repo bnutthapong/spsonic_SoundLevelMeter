@@ -1,0 +1,8 @@
+{
+  "node_id": "SLM_01",
+  "wifi_ssid": "",
+  "wifi_password": "",
+  "mqtt_broker": "",
+  "mqtt_port": 1883,
+  "http_endpoint": ""
+}

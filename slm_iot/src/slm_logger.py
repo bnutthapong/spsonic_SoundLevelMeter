@@ -3,7 +3,8 @@ import logging
 
 def setup_logging(log_filename):
     """Set up logging to a shared log file and console."""
-    os.makedirs("slm_logs", exist_ok=True)
+    slm_dir = os.path.join(os.path.dirname(__file__), '..', 'slm_logs')
+    os.makedirs(slm_dir, exist_ok=True)
     logger = logging.getLogger()
     if not logger.hasHandlers():
         logger.setLevel(logging.INFO)
