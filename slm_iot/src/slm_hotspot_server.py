@@ -2,7 +2,7 @@ from flask import Flask, render_template_string, request, redirect
 import json
 import os
 
-CONFIG_DIR = 'config'
+CONFIG_DIR = os.path.join(os.path.dirname(__file__), '..', 'config')
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'slm_config.json')
 app = Flask(__name__)
 

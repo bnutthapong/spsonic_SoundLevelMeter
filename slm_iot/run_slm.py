@@ -11,6 +11,7 @@ from src.slm_meter import monitor_microphone as start_meter
 from src.slm_meter import initilize_serialport
 from src.slm_calibrate import calibrate_with_1khz_tone
 from src.slm_logger import setup_logging
+from src.slm_apmode import enable_ap_mode, disable_ap_mode
 
 # Shared log filename (same across main and subprocesses)
 LOG_FILENAME = datetime.now().strftime("slm/slm_logs/slm_%Y%m%d_%H%M%S.log")
@@ -121,9 +122,15 @@ if __name__ == "__main__":
                         config_active = (':1CONF\r').encode()  # Ensure message ends with CRLF
                         ser_port.write(config_active)
                         ser_port.close()
+                    
+                    # Enable AP mode
+                    logger.info("Enabling hotspot mode...")                    
+                    enable_ap_mode()
+                    logger.info("Hotspot mode enabled. Connect to Pi WiFi")
+                    
                     # Start Flask server for config editing on fixed IP
                     hotspot_proc = subprocess.Popen([
-                        'python3', 'src/slm_hotspot_server.py', '--host', '192.168.4.1', '--port', '8080'
+                        'python3', 'slm/src/slm_hotspot_server.py', '--host', '192.168.4.1', '--port', '8080'
                     ])
                     logger.info("Hotspot server started. Connect to Pi WiFi and open http://192.168.4.1:8080")
                     # Wait until Switch 2 is pressed again to exit hotspot mode
@@ -135,13 +142,9 @@ if __name__ == "__main__":
                     # Stop Flask server
                     hotspot_proc.terminate()
                     hotspot_proc.wait()
-                    # Restart SLM process
-                    ser_port = initilize_serialport()
-                    slm_process = multiprocessing.Process(
-                        target=run_slm,
-                        args=(LOG_FILENAME, output_queue, time_weighting_value, rs232_or_rs485)
-                    )
-                    slm_process.start()
+                    
+                    disable_ap_mode()
+                    logger.info("Hotspot mode disabled.")
                     pressed_time = None
                     
             elif GPIO.input(SWITCH4_PIN):
