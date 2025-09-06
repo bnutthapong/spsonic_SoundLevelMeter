@@ -12,6 +12,7 @@ from src.slm_meter import initilize_serialport
 from src.slm_calibrate import calibrate_with_1khz_tone
 from src.slm_logger import setup_logging
 from src.slm_apmode import enable_ap_mode, disable_ap_mode
+from src.slm_hotspot_server import update_dietpi_wifi
 
 # Shared log filename (same across main and subprocesses)
 LOG_FILENAME = datetime.now().strftime("slm/slm_logs/slm_%Y%m%d_%H%M%S.log")

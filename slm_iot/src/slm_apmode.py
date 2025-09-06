@@ -2,6 +2,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 import subprocess
+from src.slm_hotspot_server import update_dietpi_wifi
 
 
 def enable_ap_mode():
@@ -35,6 +36,7 @@ def disable_ap_mode():
     #subprocess.run(["sudo", "ip", "addr", "add", "192.168.1.79/24", "dev", "wlan0"], check=True) # no need to set IP manully
     subprocess.run(["sudo", "dhclient", "wlan0"], check=True)
     logger.info("Wi-Fi client mode enabled.")
+    update_dietpi_wifi()
     subprocess.run(["ip", "addr", "show", "wlan0"], check=True)
     subprocess.run(["sudo", "reboot", "-n"], check=True)
     
