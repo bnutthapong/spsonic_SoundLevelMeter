@@ -4,11 +4,11 @@ import time, queue, logging
 
 from scipy.signal import lfilter, bilinear
 
-from src.slm_meter import (
-    load_active_calibration_gain, get_alpha, get_l90,
+from src.slm_constant import (
     REF_PRESSURE, SAMPLE_RATE, CHUNK_SIZE, LEQ_INTERVAL, TIME_WEIGHTING,
     error_counter, silent_frame_counter, error_threshold
 )
+from src.slm_auxiliary_function import load_active_calibration_gain, get_alpha, get_l90
  
 logger = logging.getLogger(__name__)
 

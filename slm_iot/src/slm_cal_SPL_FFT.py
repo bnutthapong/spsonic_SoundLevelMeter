@@ -3,11 +3,12 @@ import numpy as np
 import sounddevice as sd
 import time, queue, logging, json
 
-from src.slm_meter import (
-    load_active_calibration_gain, get_alpha, get_l90,
+from src.slm_constant import (
     REF_PRESSURE, SAMPLE_RATE, CHUNK_SIZE, LEQ_INTERVAL, TIME_WEIGHTING,
     error_counter, silent_frame_counter, error_threshold
 )
+from src.slm_auxiliary_function import get_alpha, get_l90
+from src.slm_cal_SPL_timedomain import load_active_calibration_gain    
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +30,10 @@ A_CURVE_DB = [
 
 
 C_CURVE_DB = [
-    -11.2, -8.5, -6.2, -4.4, -3.0, -1.9, -1.0, -0.3, 0.0,
-    0.2, 0.3, 0.3, 0.2, 0.0, -0.2, -0.5, -0.8, -1.2,
-    0.0, -0.5, -1.2, -2.0, -3.0, -4.1, -5.3, -6.6,
-    -8.0, -9.5, -11.1, -12.8, -14.6, -16.5
+    -11.2, -8.5, -6.2, -4.4, -3.0, -2, -1.3, -0.8, -0.5, -0.3,
+    -0.2, -0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    -0.1, -0.2, -0.3, -0.5, -0.8, -1.3, -2.0, -3.0, -4.4,
+    -6.2, -8.5, -11.2
 ]
 
 
@@ -47,14 +48,20 @@ def third_octave_bands(sample_rate, fft_size):
         f1 = fc / (2 ** (1 / 6))
         f2 = fc * (2 ** (1 / 6))
         idx = np.where((freqs >= f1) & (freqs <= f2))[0]
-        if len(idx) > 0:
-            bands.append((fc, idx))
+
+        # Always append, even if empty
+        bands.append((fc, idx))
+        # print(f"{fc} Hz: bins={len(idx)}")
     return bands
 
 
 def process_block(band_energies, weighting_curve_db, alpha,
                   smoothed_energy_prev, total_energy_accum,
                   total_time_accum, block_duration):
+    
+    # print("band_energies:", len(band_energies))
+    # print("weighting_curve_db:", len(weighting_curve_db))
+    
     """Process one FFT block for a given weighting (A, C, or Z)."""
     gains = 10 ** (np.array(weighting_curve_db) / 20.0)
     total_energy = np.sum(band_energies * gains**2)
@@ -78,27 +85,35 @@ def calc_leq(total_energy_accum, total_time_accum):
         (total_energy_accum / total_time_accum) / (REF_PRESSURE**2) + 1e-12
     )
 
-def load_band_calibration():
+def load_band_offset():
     """Load per-band calibration values in dB, return as numpy array."""
-    band_calibration_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'band_calibration.json')
+    band_calibration_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'band_offset_in_dBA.json')
     band_calibration_path = os.path.abspath(band_calibration_path)
     with open(band_calibration_path, 'r', encoding='utf-8') as f:
         cal_data = json.load(f)
-    # Ensure order matches CENTERS
-    return np.array([cal_data[str(fc)] for fc in CENTERS])
+    return cal_data
+
+
+def get_calibration_gain_for_bands(bands, cal_data):
+    """Return calibration gains aligned to the bands used in processing."""
+    band_freqs = [f for f, _ in bands]
+    band_cal_dB = np.array([
+        cal_data.get(str(fc), 0.0)  # fallback to 0 dB if missing
+        for fc in band_freqs
+    ])
+    return 10 ** (band_cal_dB / 20.0)
 
 
 # ======== Main function ========
 def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None):
     global ACTIVE_CALIBRATION_GAIN
+    # Load calibration data once
     ACTIVE_CALIBRATION_GAIN = load_active_calibration_gain()
-    band_cal_dB = load_band_calibration()
-
-    logger.info("Starting Sound Level Meter (FFT + 1/3 Octave + Preloaded Tables) ...")
-
-    bands = third_octave_bands(SAMPLE_RATE, CHUNK_SIZE)
-
+    cal_data = load_band_offset()
     spl_buf_A = []
+    logger.info("Starting Sound Level Meter (FFT + 1/3 Octave + Preloaded Tables) ...")
+    
+    bands = third_octave_bands(SAMPLE_RATE, CHUNK_SIZE)
     interval_start = time.time()
 
     smoothed_A = smoothed_C = smoothed_Z = 0.0
@@ -150,7 +165,7 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None):
         pressure = mag / np.sqrt(2)  # RMS per bin
 
         # Convert calibration dB to linear gain for pressure
-        calibration_gain = 10 ** (band_cal_dB / 20.0)
+        calibration_gain = get_calibration_gain_for_bands(bands, cal_data)
 
         # Apply to band energies (Pa²) — gain² because energy ∝ pressure²
         band_energies = np.array([
