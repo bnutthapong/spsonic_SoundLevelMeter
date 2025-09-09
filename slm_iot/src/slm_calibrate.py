@@ -4,12 +4,13 @@ import json
 import numpy as np
 import time
 from scipy.signal import get_window
+import queue
+
 import sounddevice as sd
 from src.slm_cal_SPL_timedomain import A_weighting, process_block
 from src.slm_constant import SAMPLE_RATE, REF_PRESSURE, optionCAL
 from src.slm_meter import initilize_serialport
 from src.slm_auxiliary_function import wifi_connected
-from src.slm_oled_display import display_calibration, display_reboot
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def save_calibration_result(result_dict, filename=None):
     with open(filename, "w") as f:
         json.dump(data, f, indent=4)
 
-def calibrate_with_1khz_tone():
+def calibrate_with_1khz_tone(display_queue=None):
     ser_new = initilize_serialport()
     global CALIBRATION_GAIN_1KHZ, ACTIVE_CALIBRATION_GAIN
     logger.info("Calibrating with 1 kHz tone at 94 dB...")
@@ -45,13 +46,38 @@ def calibrate_with_1khz_tone():
     """Display countdown 3 → 1 before recording."""
     wifi_status = wifi_connected()  # True/False
     
-    for i in range(3, 1, -1):
-        display_calibration(countdown=i, wifi=wifi_status)  # update OLED
+    for i in range(3, 0, -1):
+        if display_queue:
+            try:
+                display_queue.put_nowait({"countdown": i, "wifi": wifi_status})
+            except queue.Full:
+                display_queue.get_nowait()
+                display_queue.put_nowait({"countdown": i, "wifi": wifi_status})
         time.sleep(1)
     
-    display_calibration(countdown=-1, wifi=wifi_status)  # update OLED
+    # Start recording
+    if display_queue:
+        try:
+            display_queue.put_nowait({"countdown": -1, "wifi": wifi_status})
+        except queue.Full:
+            display_queue.get_nowait()
+            display_queue.put_nowait({"countdown": -1, "wifi": wifi_status})
+    
     duration = 3
     recording = sd.rec(int(SAMPLE_RATE * duration), samplerate=SAMPLE_RATE, channels=1, dtype='float64')
+    
+    # Continuous OLED update during recording
+    start_time = time.time()
+    while time.time() - start_time < duration:
+        if display_queue:
+            elapsed = time.time() - start_time
+            try:
+                display_queue.put_nowait({"countdown": -1, "wifi": wifi_status, "recording_progress": elapsed / duration})
+            except queue.Full:
+                display_queue.get_nowait()
+                display_queue.put_nowait({"countdown": -1, "wifi": wifi_status, "recording_progress": elapsed / duration})
+        time.sleep(0.1)  # update every 0.1 s
+    
     sd.wait()
     
     x = recording[:, 0]
@@ -87,8 +113,21 @@ def calibrate_with_1khz_tone():
     # Save result
     save_calibration_result({"CALIBRATION_GAIN_1KHZ": CALIBRATION_GAIN_1KHZ})
     
-    display_calibration(countdown=-2, wifi=wifi_status)  # update OLED
-    display_reboot(wifi=wifi_status)
+    # Final display update
+    if display_queue:
+        try:
+            display_queue.put_nowait({"countdown": -2, "wifi": wifi_status})
+        except queue.Full:
+            display_queue.get_nowait()
+            display_queue.put_nowait({"countdown": -2, "wifi": wifi_status})
+    
+    # Instead of calling display_reboot(wifi=wifi_status)
+    if display_queue:
+        try:
+            display_queue.put_nowait({"reboot": True, "wifi": wifi_status})
+        except queue.Full:
+            display_queue.get_nowait()
+            display_queue.put_nowait({"reboot": True, "wifi": wifi_status})
 
 
 def calibrate_with_sensitivity(mv_per_pa):

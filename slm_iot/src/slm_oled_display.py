@@ -1,4 +1,3 @@
-import time
 from luma.core.interface.serial import i2c
 from luma.oled.device import ssd1306
 from PIL import Image, ImageDraw, ImageFont
@@ -44,7 +43,7 @@ def display_slm(wifi=True, mode="SLOW", SPLA=0, Lmin="-", Lmax="-", Leq="-"):
 
     # --- Line 1: Wi-Fi + Centered title ---
     if wifi:
-        draw_wifi_icon(draw, x=8, y=5, scale=0.3)
+        draw_wifi_icon(draw, x=8, y=5, scale=0.5)
 
     title_text = "SONITA SLM"
     bbox = draw.textbbox((5,5), title_text, font=font_small)
@@ -78,7 +77,6 @@ def display_slm(wifi=True, mode="SLOW", SPLA=0, Lmin="-", Lmax="-", Leq="-"):
 
     # Display on OLED
     device.display(image)
-    time.sleep(0.5)  # Small delay to ensure update
 
 
 def display_calibration(countdown=3, wifi=True):
@@ -139,9 +137,63 @@ def display_reboot(wifi=True):
 
     # ---------- Line 2: Calibration instruction ----------
     calib_text = "Rebooting..."
-    bbox = draw.textbbox((0,0), calib_text, font=font_small)
+    bbox = draw.textbbox((0,0), calib_text, font=font_medium)
     w = bbox[2] - bbox[0]
-    draw.text(((device.width - w)//2, 18), calib_text, font=font_small, fill=255)
+    draw.text(((device.width - w)//2, 18), calib_text, font=font_medium, fill=255)
+
+    # Display on OLED
+    device.display(image)
+    
+
+def display_welcome(wifi=True):
+    """
+    Display Welcome screen on OLED.
+    """
+    # Blank image
+    image = Image.new("1", (device.width, device.height), "black")
+    draw = ImageDraw.Draw(image)
+
+    # ---------- Line 1: Wi-Fi + title ----------
+    if wifi:
+        draw_wifi_icon(draw, x=8, y=5, scale=0.3)
+
+    title_text = "SONITA SLM"
+    bbox = draw.textbbox((0,0), title_text, font=font_small)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, 0), title_text, font=font_small, fill=255)
+
+    # ---------- Line 2: Calibration instruction ----------
+    calib_text = "Welcome!"
+    bbox = draw.textbbox((0,0), calib_text, font=font_medium)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, 18), calib_text, font=font_medium, fill=255)
+
+    # Display on OLED
+    device.display(image)
+    
+
+def display_error(message="Error", wifi=True):
+    """
+    Display Error screen on OLED.
+    """
+    # Blank image
+    image = Image.new("1", (device.width, device.height), "black")
+    draw = ImageDraw.Draw(image)
+
+    # ---------- Line 1: Wi-Fi + title ----------
+    if wifi:
+        draw_wifi_icon(draw, x=8, y=5, scale=0.3)
+
+    title_text = "SONITA SLM"
+    bbox = draw.textbbox((0,0), title_text, font=font_small)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, 0), title_text, font=font_small, fill=255)
+
+    # ---------- Line 2: Calibration instruction ----------
+    calib_text = message
+    bbox = draw.textbbox((0,0), calib_text, font=font_medium)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, 18), calib_text, font=font_medium, fill=255)
 
     # Display on OLED
     device.display(image)

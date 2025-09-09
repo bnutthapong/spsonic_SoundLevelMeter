@@ -2,6 +2,7 @@ import time
 import logging
 import serial
 import sounddevice as sd
+import queue
 
 from src.slm_cal_SPL_timedomain import soundmeter_timedomain
 from src.slm_cal_SPL_FFT import soundmeter_FFT
@@ -28,27 +29,63 @@ def initilize_serialport():
     return ser
 
 
-def monitor_microphone(time_weighting_value=None, rs232_or_rs485=None):
+def monitor_microphone(time_weighting_value=None, rs232_or_rs485=None,
+                       output_queue=None, display_queue=None):
+    first_init = True # Track first-time initialization
     while True:
         try:
+            # === Tell OLED what's happening ===
+            if display_queue:
+                msg = {"wifi": False}
+                if first_init:
+                    msg["welcome"] = True
+                else:
+                    msg["reboot"] = True
+
+                try:
+                    display_queue.put_nowait(msg)
+                except queue.Full:
+                    display_queue.get_nowait()
+                    display_queue.put_nowait(msg)
+
+            
             logger.info("Attempting to initialize microphone...")
             sd._terminate()
             sd._initialize()
-            time.sleep(2)
+            time.sleep(0.5)
             input_devices = [d for d in sd.query_devices() if d['max_input_channels'] > 0]
             if not input_devices:
                 raise sd.PortAudioError("No input device available")
 
             sd.default.device = input_devices[0]['name']
             logger.info(f"Using input device: {sd.default.device}")
+            
+            # Mark that we've done the first init
+            first_init = False
 
             # Now send SPL values as normal
-            for spl in soundmeter(time_weighting_value, rs232_or_rs485):
+            for spl in soundmeter(time_weighting_value, rs232_or_rs485, output_queue, display_queue):
                 yield spl
 
         except (sd.PortAudioError, sd.CallbackAbort, OSError) as e:
             logger.warning("Microphone disconnected or unavailable. Retrying in 5 seconds...")
             logger.debug(f"Full error: {e}")
+            
+            if display_queue:
+                try:
+                    display_queue.put_nowait({
+                        "error": True,
+                        "wifi": False,
+                        "message": "Mic Error"  # you can customize
+                    })
+                except queue.Full:
+                    display_queue.get_nowait()
+                    display_queue.put_nowait({
+                        "error": True,
+                        "wifi": False,
+                        "message": "Mic Error"
+                    })
+            
             yield (":1Err1\r").encode()
             time.sleep(5)
 
