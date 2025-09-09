@@ -2,11 +2,14 @@ import os
 import logging
 import json
 import numpy as np
+import time
 from scipy.signal import get_window
 import sounddevice as sd
 from src.slm_cal_SPL_timedomain import A_weighting, process_block
 from src.slm_constant import SAMPLE_RATE, REF_PRESSURE, optionCAL
 from src.slm_meter import initilize_serialport
+from src.slm_auxiliary_function import wifi_connected
+from src.slm_oled_display import display_calibration, display_reboot
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +41,15 @@ def calibrate_with_1khz_tone():
 
     msg = (':1CAL\r').encode()  # Ensure message ends with CRLF
     ser_new.write(msg)
-
+    
+    """Display countdown 3 → 1 before recording."""
+    wifi_status = wifi_connected()  # True/False
+    
+    for i in range(3, 1, -1):
+        display_calibration(countdown=i, wifi=wifi_status)  # update OLED
+        time.sleep(1)
+    
+    display_calibration(countdown=-1, wifi=wifi_status)  # update OLED
     duration = 3
     recording = sd.rec(int(SAMPLE_RATE * duration), samplerate=SAMPLE_RATE, channels=1, dtype='float64')
     sd.wait()
@@ -75,6 +86,9 @@ def calibrate_with_1khz_tone():
     
     # Save result
     save_calibration_result({"CALIBRATION_GAIN_1KHZ": CALIBRATION_GAIN_1KHZ})
+    
+    display_calibration(countdown=-2, wifi=wifi_status)  # update OLED
+    display_reboot(wifi=wifi_status)
 
 
 def calibrate_with_sensitivity(mv_per_pa):

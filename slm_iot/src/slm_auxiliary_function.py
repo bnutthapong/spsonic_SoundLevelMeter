@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import numpy as np
+import subprocess
 logger = logging.getLogger(__name__)
 
 def get_alpha(time_constant, block_duration):
@@ -20,3 +21,12 @@ def load_active_calibration_gain():
             data = json.load(f)
         return data.get('ACTIVE_CALIBRATION_GAIN') or data.get('CALIBRATION_GAIN_1KHZ') or 1.0
     return 1.0
+
+
+# Check Wi-Fi connection
+def wifi_connected():
+    try:
+        ssid = subprocess.check_output("iwgetid -r", shell=True).decode().strip()
+        return bool(ssid)
+    except Exception:
+        return False

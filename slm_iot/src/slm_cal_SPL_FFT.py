@@ -7,8 +7,9 @@ from src.slm_constant import (
     REF_PRESSURE, SAMPLE_RATE, CHUNK_SIZE, LEQ_INTERVAL, TIME_WEIGHTING,
     error_counter, silent_frame_counter, error_threshold
 )
-from src.slm_auxiliary_function import get_alpha, get_l90
-from src.slm_cal_SPL_timedomain import load_active_calibration_gain    
+from src.slm_auxiliary_function import get_alpha, get_l90, wifi_connected
+from src.slm_cal_SPL_timedomain import load_active_calibration_gain
+from src.slm_oled_display import display_slm
 
 logger = logging.getLogger(__name__)
 
@@ -120,42 +121,21 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None):
     total_energy_A = total_energy_C = total_energy_Z = 0.0
     total_time_A = total_time_C = total_time_Z = 0.0
 
-    current_weighting = (
-        time_weighting_value.value if time_weighting_value else TIME_WEIGHTING
-    )
+    current_weighting = (time_weighting_value.value if time_weighting_value else TIME_WEIGHTING)
     block_duration = CHUNK_SIZE / SAMPLE_RATE
     alpha = get_alpha(1.0 if current_weighting == "slow" else 0.125, block_duration)
 
     print_interval = 0.5
     last_print_time = time.time()
     q = queue.Queue()
-
+    connected = wifi_connected()
+    
     def callback(indata, frames, time_info, status):
         global error_counter, silent_frame_counter
         nonlocal spl_buf_A, interval_start, last_print_time
         nonlocal smoothed_A, smoothed_C, smoothed_Z
         nonlocal total_energy_A, total_energy_C, total_energy_Z
         nonlocal total_time_A, total_time_C, total_time_Z
-
-        # Error handling
-        if status:
-            logger.error(f"Stream error: {status}")
-            error_counter += 1
-            if error_counter >= error_threshold:
-                logger.error("Persistent input overflow — assuming mic disconnected.")
-                raise sd.CallbackAbort
-            return
-
-        if np.all(indata == 0):
-            silent_frame_counter += 1
-            logger.warning(f"Input buffer is silent ({silent_frame_counter}/{error_threshold})")
-            if silent_frame_counter >= error_threshold:
-                logger.error("Too many silent buffers — mic likely unplugged.")
-                raise sd.CallbackAbort
-            return
-        else:
-            silent_frame_counter = 0
-            error_counter = 0
 
         ## FFT + 1/3 Octave ##
         audio_data = indata[:, 0] * ACTIVE_CALIBRATION_GAIN
@@ -189,6 +169,11 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None):
 
         # Store SPL(A) for statistics (Lmax, Lmin, L90)
         spl_buf_A.append(LAF)
+        
+        # Lmax, Lmin, L90 calculation
+        lmax_val = max(spl_buf_A)
+        lmin_val = min(spl_buf_A)
+        l90_val  = get_l90(np.array(spl_buf_A))
 
         ## Output to RS232/RS485 periodically ##
         now = time.time()
@@ -220,10 +205,6 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None):
             lc_eq   = calc_leq(total_energy_C, total_time_C)
             lz_eq   = calc_leq(total_energy_Z, total_time_Z)
 
-            lmax_val = max(spl_buf_A)
-            lmin_val = min(spl_buf_A)
-            l90_val  = get_l90(np.array(spl_buf_A))
-
             msg_result = (
                 f"Time: {time.strftime('%H:%M:%S')} | SPL(A): {LAF:.1f} dBA "
                 f"| Leq: {leq_val:.1f} dBA | Lmax: {lmax_val:.1f} dBA "
@@ -238,7 +219,16 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None):
             total_energy_A = total_energy_C = total_energy_Z = 0.0
             total_time_A   = total_time_C   = total_time_Z   = 0.0
             interval_start = now
-
+        
+        # Update weighting if changed
+        display_slm(
+            wifi=connected,
+            mode=time_weighting_value.value,
+            SPLA=LAF,
+            Lmin=lmin_val,
+            Lmax=lmax_val,
+            Leq=leq_val if 'leq_val' in locals() else "-"
+        )
 
     with sd.InputStream(channels=1, samplerate=SAMPLE_RATE, blocksize=CHUNK_SIZE, callback=callback):
         print("Press Ctrl+C to stop.")
