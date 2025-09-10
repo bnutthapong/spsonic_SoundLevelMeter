@@ -16,7 +16,7 @@ from src.slm_apmode import enable_ap_mode, disable_ap_mode
 from src.slm_cal_SPL_FFT import _display_thread, set_display_queue
 
 # Shared log filename
-LOG_FILENAME = datetime.now().strftime("slm/slm_logs/slm_%Y%m%d_%H%M%S.log")
+LOG_FILENAME = datetime.now().strftime("slm_%Y%m%d_%H%M%S.log")
 
 logger = logging.getLogger(__name__)
 
