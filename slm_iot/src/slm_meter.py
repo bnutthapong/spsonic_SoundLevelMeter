@@ -30,7 +30,7 @@ def initilize_serialport():
 
 
 def monitor_microphone(time_weighting_value=None, rs232_or_rs485=None,
-                       output_queue=None, display_queue=None):
+                       output_queue=None, display_queue=None, weighting_value=None):
     first_init = True # Track first-time initialization
     while True:
         try:
@@ -64,7 +64,7 @@ def monitor_microphone(time_weighting_value=None, rs232_or_rs485=None,
             first_init = False
 
             # Now send SPL values as normal
-            for spl in soundmeter(time_weighting_value, rs232_or_rs485, output_queue, display_queue):
+            for spl in soundmeter(time_weighting_value, rs232_or_rs485, output_queue, display_queue, weighting_value):
                 yield spl
 
         except (sd.PortAudioError, sd.CallbackAbort, OSError) as e:
@@ -76,7 +76,7 @@ def monitor_microphone(time_weighting_value=None, rs232_or_rs485=None,
                     display_queue.put_nowait({
                         "error": True,
                         "wifi": False,
-                        "message": "Mic Error"  # you can customize
+                        "message": "Mic discon"  # you can customize
                     })
                 except queue.Full:
                     display_queue.get_nowait()

@@ -7,6 +7,7 @@ import RPi.GPIO as GPIO
 import serial
 import subprocess
 import threading
+import queue
 
 from src.slm_meter import monitor_microphone as start_meter
 from src.slm_meter import initilize_serialport
@@ -20,9 +21,9 @@ LOG_FILENAME = datetime.now().strftime("slm_%Y%m%d_%H%M%S.log")
 
 logger = logging.getLogger(__name__)
 
-def run_slm(log_filename, output_queue, time_weighting_value, rs232_or_rs485, display_queue):
+def run_slm(log_filename, output_queue, time_weighting_value, rs232_or_rs485, display_queue, weighting_value):
     setup_logging(log_filename)
-    for spl_dBA in start_meter(time_weighting_value, rs232_or_rs485, output_queue, display_queue):
+    for spl_dBA in start_meter(time_weighting_value, rs232_or_rs485, output_queue, display_queue, weighting_value):
         output_queue.put(spl_dBA)  # Send value to parent process
 
 # GPIO setup
@@ -30,12 +31,14 @@ SWITCH1_PIN = 17
 SWITCH2_PIN = 27
 SWITCH3_PIN = 22
 SWITCH4_PIN = 18
+SWITCH5_PIN = 23
 
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(SWITCH1_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(SWITCH2_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(SWITCH3_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(SWITCH4_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(SWITCH5_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
 prev_switch_state = GPIO.input(SWITCH3_PIN)
 
@@ -57,6 +60,7 @@ if __name__ == "__main__":
     # Shared values
     time_weighting_value = manager.Value('u', 'fast')
     rs232_or_rs485 = manager.Value('u', 'rs485')
+    weighting_value = manager.Value('u', 'A')
 
     # Initialize serial port
     try:
@@ -72,11 +76,15 @@ if __name__ == "__main__":
     # Start SLM process
     slm_process = multiprocessing.Process(
         target=run_slm,
-        args=(LOG_FILENAME, output_queue, time_weighting_value, rs232_or_rs485, display_queue)
+        args=(LOG_FILENAME, output_queue, time_weighting_value, rs232_or_rs485, display_queue, weighting_value)
     )
     slm_process.start()
 
     pressed_time = None
+    DEBOUNCE_MS = 50
+    last_press = {"SWITCH4": 0, "SWITCH5": 0}  # store last press time in ms
+    current_time_ms = lambda: int(time.time() * 1000)
+    
     try:
         # Set initial mode based on RS232/RS485 switch
         if prev_switch_state:
@@ -115,11 +123,10 @@ if __name__ == "__main__":
                     ser_port = initilize_serialport()
                     slm_process = multiprocessing.Process(
                         target=run_slm,
-                        args=(LOG_FILENAME, output_queue, time_weighting_value, rs232_or_rs485, display_queue)
+                        args=(LOG_FILENAME, output_queue, time_weighting_value, rs232_or_rs485, display_queue, weighting_value)
                     )
                     slm_process.start()
                     pressed_time = None
-
             # Switch2: Hotspot mode
             elif GPIO.input(SWITCH2_PIN):
                 if pressed_time is None:
@@ -128,7 +135,7 @@ if __name__ == "__main__":
                     logger.info("Switch 2 held for 3 seconds - Hotspot ON...")
                     slm_process.terminate()
                     slm_process.join()
-                    if ser_port.is_open and rs232_or_rs485.value == "rs485":
+                    if ser_port.is_open and rs232_or_rs485.value == "rs485" and rs232_or_rs485.value == "rs232":
                         ser_port.write((':1CONF\r').encode())
                         ser_port.close()
 
@@ -138,30 +145,66 @@ if __name__ == "__main__":
                         "python3", "slm/src/slm_hotspot_server.py",
                         "--host", "192.168.4.1", "--port", "8080"
                     ])
+                    # Show "AP Mode" on OLED
+                    try:
+                        display_queue.put_nowait({"ap_mode": True, "wifi": True})
+                    except queue.Full:
+                        display_queue.get_nowait()
+                        display_queue.put_nowait({"ap_mode": True, "wifi": True})
+                    
                     while True:
                         time.sleep(0.5)
                         if GPIO.input(SWITCH2_PIN):
+                            if display_queue:
+                                try:
+                                    display_queue.put_nowait({"reboot": True, "wifi": False})
+                                except queue.Full:
+                                    display_queue.get_nowait()
+                                    display_queue.put_nowait({"reboot": True, "wifi": False})
                             break
+                        
                     hotspot_proc.terminate()
                     hotspot_proc.wait()
                     disable_ap_mode()
                     pressed_time = None
-
             # Switch4: Toggle time weighting
-            elif GPIO.input(SWITCH4_PIN):
+            elif GPIO.input(SWITCH4_PIN) and current_time_ms() - last_press["SWITCH4"] > DEBOUNCE_MS:
+                last_press["SWITCH4"] = current_time_ms()
                 if time_weighting_value.value == "fast":
                     time_weighting_value.value = "slow"
                     mode_active = (':1-SL-\r').encode()
                 else:
                     time_weighting_value.value = "fast"
                     mode_active = (':1-FA-\r').encode()
+                
                 if ser_port.is_open and rs232_or_rs485.value == "rs485":
                     ser_port.write(mode_active)
                     time.sleep(1)
+                
+                time.sleep(0.5) # Sleep a tiny amount to prevent high CPU usage
+                
+            # Switch5: Toggle weighting A, C, Z
+            elif GPIO.input(SWITCH5_PIN) and current_time_ms() - last_press["SWITCH5"] > DEBOUNCE_MS:
+                last_press["SWITCH5"] = current_time_ms()
+                if weighting_value.value == "A":
+                    weighting_value.value = "C"
+                    weighting_active = (':1-dBC\r').encode()
+                elif weighting_value.value == "C":
+                    weighting_value.value = "Z"
+                    weighting_active = (':1-dBZ\r').encode()
+                else:
+                    weighting_value.value = "A"
+                    weighting_active = (':1-dBA\r').encode()
+                
+                if ser_port.is_open and rs232_or_rs485.value == "rs485":
+                    ser_port.write(weighting_active)
+                    time.sleep(1)
+                    
+                time.sleep(0.5) # Sleep a tiny amount to prevent high CPU usage
             else:
                 pressed_time = None
 
-            # RS232/RS485 switch
+            # Switch3: RS232/RS485 switch
             current_switch_state = GPIO.input(SWITCH3_PIN)
             if current_switch_state != prev_switch_state:
                 if current_switch_state:

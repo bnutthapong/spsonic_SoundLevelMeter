@@ -121,7 +121,7 @@ def calibrate_with_1khz_tone(display_queue=None):
             display_queue.get_nowait()
             display_queue.put_nowait({"countdown": -2, "wifi": wifi_status})
     
-    # Instead of calling display_reboot(wifi=wifi_status)
+    
     if display_queue:
         try:
             display_queue.put_nowait({"reboot": True, "wifi": wifi_status})

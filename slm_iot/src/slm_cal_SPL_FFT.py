@@ -11,7 +11,7 @@ from src.slm_constant import (
 )
 from src.slm_auxiliary_function import get_alpha, get_l90, wifi_connected
 from src.slm_cal_SPL_timedomain import load_active_calibration_gain
-from src.slm_oled_display import display_slm, display_reboot, display_calibration, display_welcome, display_error
+from src.slm_oled_display import display_slm, display_reboot, display_calibration, display_welcome, display_msg
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +68,14 @@ def _display_thread():
                         wifi=last_data.get("wifi", False)
                     )
                 elif "error" in last_data and last_data["error"]:
-                    display_error(
+                    display_msg(
                         message=last_data.get("message", "Error"),
                         wifi=last_data.get("wifi", False)
                     )
+                elif "ap_mode" in last_data and last_data["ap_mode"]:
+                    display_msg(
+                        message=last_data.get("message", "AP Mode running"),
+                        wifi=last_data.get("wifi", False))
                 else:
                     display_slm(**last_data)
 
@@ -106,9 +110,15 @@ def calc_leq(total_energy_accum, total_time_accum):
     return 10 * np.log10((total_energy_accum / total_time_accum) / (REF_PRESSURE**2) + 1e-12)
 
 def load_band_offset():
-    path = os.path.join(os.path.dirname(__file__), '..', 'config', 'band_offset_in_dBA.json')
+    path = os.path.join(os.path.dirname(__file__), '..', 'config', 'band_offset_in_dBZ.json')
     with open(os.path.abspath(path), 'r', encoding='utf-8') as f:
         return json.load(f)
+    
+def load_A_weighting_offset():
+    path = os.path.join(os.path.dirname(__file__), '..', 'config', 'slm_config.json')
+    with open(os.path.abspath(path), 'r', encoding='utf-8') as f:
+        data = json.load(f)
+        return data["a_weighting_offset"]
 
 def get_calibration_gain_for_bands(bands, cal_data):
     band_freqs = [f for f, _ in bands]
@@ -116,14 +126,17 @@ def get_calibration_gain_for_bands(bands, cal_data):
     return 10 ** (band_cal_dB / 20.0)
 
 # ======== Main function ========
-def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=None, display_queue=None):
+def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=None, display_queue=None, weighting_value=None):
     global ACTIVE_CALIBRATION_GAIN
     if display_queue is None:
         raise ValueError("display_queue must be provided")  # No fallback queue
 
     ACTIVE_CALIBRATION_GAIN = load_active_calibration_gain()
-    cal_data = load_band_offset()
-    spl_buf_A = []
+    band_offset_dbz = load_band_offset()
+    a_weighting_offset = load_A_weighting_offset()
+    cal_data = {k: v + float(a_weighting_offset) for k, v in band_offset_dbz.items()}
+    
+    spl_buf = []
 
     logger.info("Starting Sound Level Meter ...")
     bands = third_octave_bands(SAMPLE_RATE, CHUNK_SIZE)
@@ -137,12 +150,12 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
     block_duration = CHUNK_SIZE / SAMPLE_RATE
     alpha = get_alpha(1.0 if current_weighting == "slow" else 0.125, block_duration)
     
-    print_interval = 0.5  # RS232/RS485 interval
+    #print_interval = 0.5  # RS232/RS485 interval
     last_print_time = time.time()
     connected = wifi_connected()
 
     def callback(indata, frames, time_info, status):
-        nonlocal spl_buf_A, interval_start, last_print_time
+        nonlocal spl_buf, interval_start, last_print_time
         nonlocal smoothed_A, smoothed_C, smoothed_Z
         nonlocal total_energy_A, total_energy_C, total_energy_Z
         nonlocal total_time_A, total_time_C, total_time_Z
@@ -169,16 +182,30 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
             band_energies, Z_CURVE_DB, alpha, smoothed_Z, total_energy_Z, total_time_Z, block_duration
         )
 
-        spl_buf_A.append(LAF)
-        lmax_val = max(spl_buf_A)
-        lmin_val = min(spl_buf_A)
-        l90_val = get_l90(np.array(spl_buf_A))
+        if weighting_value.value == "C":
+            display_SPL = round(LCF,1)
+        elif weighting_value.value == "Z":
+            display_SPL = round(LZF,1)
+        else:
+            display_SPL = round(LAF,1)
+        
+        spl_buf.append(display_SPL)
+        lmax_val = max(spl_buf)
+        lmin_val = min(spl_buf)
+        l90_val = get_l90(np.array(spl_buf))
 
         now = time.time()
 
         # ---- RS232/RS485 output every print_interval ----
-        if now - last_print_time >= print_interval:
-            value = round(LAF, 1)
+        if rs232_or_rs485.value == "rs232":
+            print_interval = 0.125
+        else:
+            print_interval = 0.5
+        
+        # logger.info(f"Print interval set to {print_interval} seconds based on mode {rs232_or_rs485.value}")
+        
+        if now - last_print_time >= print_interval :
+            value = round(display_SPL, 1)
             if rs232_or_rs485.value == "rs232":
                 if value < 10:
                     msg = f"S00{value}\r\n"
@@ -217,19 +244,20 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
                 f"| SPL(C): {LCF:.1f} dBC | SPL(Z): {LZF:.1f} dBZ "
                 f"| LCeq: {lc_eq:.1f} dBC | LZeq: {lz_eq:.1f} dBZ"
             )
-            spl_buf_A.clear()
+            spl_buf.clear()
             total_energy_A = total_energy_C = total_energy_Z = 0.0
             total_time_A = total_time_C = total_time_Z = 0.0
             interval_start = now
-
+            
         # ---- Push display data (non-blocking) ----
         display_data = {
             "wifi": connected,
             "mode": time_weighting_value.value,
-            "SPLA": LAF,
+            "SPL": display_SPL,
             "Lmin": lmin_val,
             "Lmax": lmax_val,
-            "Leq": leq_val if 'leq_val' in locals() else "-"
+            "Leq": leq_val if 'leq_val' in locals() else "-",
+            "weighting_show": weighting_value.value
         }
         
         try:

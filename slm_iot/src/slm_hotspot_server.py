@@ -61,6 +61,11 @@ HTML_FORM = '''
     <label for="node_id">Node ID:</label>
     <input type="text" name="node_id" id="node_id" value="{{ config.get('node_id', '') }}" required>
   </div>
+  
+<div class="form-group">
+    <label for="node_id">A-weighting Offset:</label>
+    <input type="text" name="a_weighting_offset" id="a_weighting_offset" value="{{ config.get('a_weighting_offset', '') }}" required>
+  </div>
 
   <div class="form-group">
     <label for="wifi_ssid">Wi-Fi SSID:</label>
@@ -166,6 +171,7 @@ def update_dietpi_wifi():
 def edit_config():
     default_config = {
         "node_id": "",
+        "a_weighting_offset": 0.0,
         "wifi_ssid": "",
         "wifi_password": "",
         "mqtt_broker": "",

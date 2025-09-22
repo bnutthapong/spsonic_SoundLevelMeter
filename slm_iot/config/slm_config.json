@@ -1,7 +1,8 @@
 {
   "node_id": "SLM_01",
-  "wifi_ssid": "",
-  "wifi_password": "",
+  "a_weighting_offset": "2.65",
+  "wifi_ssid": "None",
+  "wifi_password": null,
   "mqtt_broker": "",
   "mqtt_port": 1883,
   "http_endpoint": ""
