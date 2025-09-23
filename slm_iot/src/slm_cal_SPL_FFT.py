@@ -76,6 +76,10 @@ def _display_thread():
                     display_msg(
                         message=last_data.get("message", "AP Mode running"),
                         wifi=last_data.get("wifi", False))
+                elif "initialise" in last_data and last_data["initialise"]:
+                    display_msg(
+                        message=last_data.get("message", "Initializing..."),
+                        wifi=last_data.get("wifi", False))
                 else:
                     display_slm(**last_data)
 

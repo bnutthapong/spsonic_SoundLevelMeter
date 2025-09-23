@@ -38,7 +38,7 @@ def monitor_microphone(time_weighting_value=None, rs232_or_rs485=None,
             if display_queue:
                 msg = {"wifi": False}
                 if first_init:
-                    msg["welcome"] = True
+                    msg["initialise"] = True
                 else:
                     msg["reboot"] = True
 

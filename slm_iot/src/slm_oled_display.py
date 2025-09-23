@@ -9,22 +9,26 @@ serial = i2c(port=1, address=0x3C)
 device = ssd1306(serial)
 
 # Example adjusted positions
-LINE1_Y = 0         # Title
-LINE2_Y = 22        # Mode
-LINE3_Y = 45        # SPL
+LINE1_WIFI = 0
+LINE1_Y = 6         # Title
+LINE2_Y = 32        # Mode
+LINE3_Y = 52        # SPL
 
 # Load fonts
 try:
     font_small = ImageFont.truetype("DejaVuSans.ttf", 10)
+    font_small_plus = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
     font_medium = ImageFont.truetype("DejaVuSans.ttf", 12)
+    font_medium_plus = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
     font_large = ImageFont.truetype("DejaVuSans.ttf", 20)
+    font_large_plus = ImageFont.truetype("DejaVuSans-Bold.ttf", 30)
 except:
-    logger.warning("DejaVuSans.ttf not found. Using default font.")
+    logger.warning("DejaVuSans-Bold.ttf not found. Using default font.")
     font_small = font_medium = font_large = ImageFont.load_default()
 
 
 # Wi-Fi symbol
-def draw_wifi_icon(draw, x=0, y=LINE1_Y, scale=0.5):
+def draw_wifi_icon(draw, x=0, y=LINE1_WIFI, scale=0.5):
     """
     Draw a small Wi-Fi symbol at (x, y)
     scale <1 makes it smaller
@@ -48,25 +52,32 @@ def display_slm(wifi=True, mode="SLOW", SPL=0, Lmin="-", Lmax="-", Leq="-", weig
 
     # --- Line 1: Wi-Fi + Centered title ---
     if wifi:
-        draw_wifi_icon(draw, x=8, y=5, scale=0.5)
+        draw_wifi_icon(draw, x=110, y=5, scale=0.5)
 
-    title_text = "SONITA"
-    bbox = draw.textbbox((5,5), title_text, font=font_medium)
-    w = bbox[2] - bbox[0]
-    x_center = (device.width - w)//2
-    draw.text((x_center, LINE1_Y), title_text, font=font_medium, fill=255)
+    # title_text = "SONITA"
+    # bbox = draw.textbbox((5,5), title_text, font=font_medium)
+    # w = bbox[2] - bbox[0]
+    # x_center = (device.width - w)//2
+    # draw.text((x_center, LINE1_Y), title_text, font=font_medium, fill=255)
 
     # ---------- Line 2: Mode ----------
     mode_text = str(mode).upper()
-    bbox = draw.textbbox((0,0), mode_text, font=font_medium)
-    w = bbox[2] - bbox[0]
-    draw.text(((device.width - w)//2, LINE2_Y), mode_text, font=font_medium, fill=255)
+    # bbox = draw.textbbox((0,0), mode_text, font=font_medium)
+    # w = bbox[2] - bbox[0]
+    # draw.text(((device.width - w)//2, LINE1_Y), mode_text, font=font_medium, fill=255)
+    draw.text((5, LINE1_Y), f"SPL {mode_text}", font=font_medium, fill=255)
 
     # ---------- Line 3: SPL dB A, C, Z ----------
-    spl_text = f"{SPL:.1f} dB{weighting_show}" if isinstance(SPL, (int, float)) else str(SPL)
-    bbox = draw.textbbox((0,0), spl_text, font=font_large)
+    
+    spl_text = f"{SPL:.1f} " if isinstance(SPL, (int, float)) else str(SPL)
+    bbox = draw.textbbox((0,0), spl_text, font=font_large_plus)
     w = bbox[2] - bbox[0]
-    draw.text(((device.width - w)//2, LINE3_Y), spl_text, font=font_large, fill=255)
+    spl_line_y = 36
+    draw.text(((device.width - w)//2 - 15, spl_line_y), spl_text, font=font_large_plus, fill=255)
+    
+    weighting_show = f"dB{weighting_show}"
+    w, h = draw.textsize(weighting_show, font=font_medium_plus)
+    draw.text((128 - w, spl_line_y + 14), weighting_show, font=font_medium_plus, fill=255)
 
     # # ---------- Line 4: Lmin, Lmax, Leq ----------
     # # Replace None or empty with '-'
@@ -84,7 +95,7 @@ def display_slm(wifi=True, mode="SLOW", SPL=0, Lmin="-", Lmax="-", Leq="-", weig
     device.display(image)
 
 
-def display_calibration(countdown=3, wifi=True):
+def display_calibration(countdown=3, wifi=False):
     """
     Display calibration screen on OLED.
     countdown: integer 3, 2, or 1
@@ -95,7 +106,7 @@ def display_calibration(countdown=3, wifi=True):
 
     # ---------- Line 1: Wi-Fi + title ----------
     if wifi:
-        draw_wifi_icon(draw, x=8, y=5, scale=0.3)
+        draw_wifi_icon(draw, x=110, y=5, scale=0.5)
 
     title_text = "SONITA"
     bbox = draw.textbbox((0,0), title_text, font=font_medium)
@@ -104,9 +115,9 @@ def display_calibration(countdown=3, wifi=True):
 
     # ---------- Line 2: Calibration instruction ----------
     calib_text = "Sound 94dB at 1kHz"
-    bbox = draw.textbbox((0,0), calib_text, font=font_small)
+    bbox = draw.textbbox((0,0), calib_text, font=font_medium)
     w = bbox[2] - bbox[0]
-    draw.text(((device.width - w)//2, LINE2_Y), calib_text, font=font_small, fill=255)
+    draw.text(((device.width - w)//2, LINE2_Y), calib_text, font=font_medium, fill=255)
 
     # ---------- Line 3: Countdown ----------
     if countdown == -1:
@@ -115,15 +126,15 @@ def display_calibration(countdown=3, wifi=True):
         countdown = "Done"
         
     countdown_text = str(countdown)
-    bbox = draw.textbbox((0,0), countdown_text, font=font_large)
+    bbox = draw.textbbox((0,0), countdown_text, font=font_medium)
     w = bbox[2] - bbox[0]
-    draw.text(((device.width - w)//2, LINE3_Y), countdown_text, font=font_large, fill=255)
+    draw.text(((device.width - w)//2, LINE3_Y), countdown_text, font=font_medium, fill=255)
 
     # Display on OLED
     device.display(image)
     
 
-def display_reboot(wifi=True):
+def display_reboot(wifi=False):
     """
     Display Reboot screen on OLED.
     """
@@ -133,7 +144,7 @@ def display_reboot(wifi=True):
 
     # ---------- Line 1: Wi-Fi + title ----------
     if wifi:
-        draw_wifi_icon(draw, x=8, y=5, scale=0.3)
+        draw_wifi_icon(draw, x=110, y=5, scale=0.5)
 
     title_text = "SONITA"
     bbox = draw.textbbox((0,0), title_text, font=font_medium)
@@ -150,7 +161,7 @@ def display_reboot(wifi=True):
     device.display(image)
     
 
-def display_welcome(wifi=True):
+def display_welcome(wifi=False):
     """
     Display Welcome screen on OLED.
     """
@@ -160,7 +171,7 @@ def display_welcome(wifi=True):
 
     # ---------- Line 1: Wi-Fi + title ----------
     if wifi:
-        draw_wifi_icon(draw, x=8, y=5, scale=0.3)
+        draw_wifi_icon(draw, x=110, y=5, scale=0.5)
 
     title_text = "SONITA"
     bbox = draw.textbbox((0,0), title_text, font=font_medium)
@@ -168,7 +179,7 @@ def display_welcome(wifi=True):
     draw.text(((device.width - w)//2, LINE1_Y), title_text, font=font_medium, fill=255)
 
     # ---------- Line 2: Calibration instruction ----------
-    calib_text = "Welcome!"
+    calib_text = "Welcome"
     bbox = draw.textbbox((0,0), calib_text, font=font_medium)
     w = bbox[2] - bbox[0]
     draw.text(((device.width - w)//2, LINE2_Y), calib_text, font=font_medium, fill=255)
@@ -187,7 +198,7 @@ def display_msg(message="msg", wifi=True):
 
     # ---------- Line 1: Wi-Fi + title ----------
     if wifi:
-        draw_wifi_icon(draw, x=8, y=5, scale=0.3)
+        draw_wifi_icon(draw, x=110, y=5, scale=0.5)
 
     title_text = "SONITA"
     bbox = draw.textbbox((0,0), title_text, font=font_medium)

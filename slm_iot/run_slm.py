@@ -47,6 +47,7 @@ if __name__ == "__main__":
     setup_logging(LOG_FILENAME)
     logger = logging.getLogger(__name__)
     logger.info("Sound Level Meter (SLM) started.")
+    
 
     # Manager for shared state and queues
     manager = Manager()
@@ -61,6 +62,12 @@ if __name__ == "__main__":
     time_weighting_value = manager.Value('u', 'fast')
     rs232_or_rs485 = manager.Value('u', 'rs485')
     weighting_value = manager.Value('u', 'A')
+    
+    try:
+        display_queue.put_nowait({"welcome": True, "wifi": False})
+    except queue.Full:
+        display_queue.get_nowait()
+        display_queue.put_nowait({"error": True, "wifi": False})
 
     # Initialize serial port
     try:
@@ -72,6 +79,7 @@ if __name__ == "__main__":
         logger.info(f"Serial port {ser_port.port} opened successfully.")
     except Exception as e:
         logger.exception(f"Serial port error: {e}")
+
 
     # Start SLM process
     slm_process = multiprocessing.Process(
@@ -150,7 +158,7 @@ if __name__ == "__main__":
                         display_queue.put_nowait({"ap_mode": True, "wifi": True})
                     except queue.Full:
                         display_queue.get_nowait()
-                        display_queue.put_nowait({"ap_mode": True, "wifi": True})
+                        display_queue.put_nowait({"error": True, "wifi": True})
                     
                     while True:
                         time.sleep(0.5)
@@ -160,7 +168,7 @@ if __name__ == "__main__":
                                     display_queue.put_nowait({"reboot": True, "wifi": False})
                                 except queue.Full:
                                     display_queue.get_nowait()
-                                    display_queue.put_nowait({"reboot": True, "wifi": False})
+                                    display_queue.put_nowait({"error": True, "wifi": False})
                             break
                         
                     hotspot_proc.terminate()
