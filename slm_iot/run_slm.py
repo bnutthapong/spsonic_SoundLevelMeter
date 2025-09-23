@@ -72,11 +72,19 @@ if __name__ == "__main__":
     # Initialize serial port
     try:
         ser_port = initilize_serialport()
-        if ser_port.is_open and rs232_or_rs485.value == "rs485":
+        check_sw_ser_out = GPIO.input(SWITCH3_PIN)
+        if check_sw_ser_out:
+            ser_out_mode = "rs232"
+        else:
+            ser_out_mode = "rs485"
+            
+        if ser_port.is_open and ser_out_mode == "rs485":
             for val in ["1-", "1--", "1---", "1----"]:
                 ser_port.write(f":{val}\r".encode())
                 time.sleep(1)
+                
         logger.info(f"Serial port {ser_port.port} opened successfully.")
+        logger.info(f"Serial port mode: {ser_out_mode}")
     except Exception as e:
         logger.exception(f"Serial port error: {e}")
 
