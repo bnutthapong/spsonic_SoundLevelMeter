@@ -76,7 +76,9 @@ def display_slm(wifi=True, mode="SLOW", SPL=0, Lmin="-", Lmax="-", Leq="-", weig
     draw.text(((device.width - w)//2 - 15, spl_line_y), spl_text, font=font_large_plus, fill=255)
     
     weighting_show = f"dB{weighting_show}"
-    w, h = draw.textsize(weighting_show, font=font_medium_plus)
+    bbox = draw.textbbox((0, 0), weighting_show, font=font_medium_plus)
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
     draw.text((128 - w, spl_line_y + 14), weighting_show, font=font_medium_plus, fill=255)
 
     # # ---------- Line 4: Lmin, Lmax, Leq ----------
