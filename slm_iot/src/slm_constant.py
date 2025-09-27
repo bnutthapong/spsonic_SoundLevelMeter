@@ -4,6 +4,7 @@ LEQ_INTERVAL = 60     # Seconds (can be configured)
 SAMPLE_RATE = 48000
 CHUNK_SIZE = 4096  # Number of samples per frame
 TIME_WEIGHTING = "fast"  # Options: "fast", "slow", "none"
+REF_DB = 94
 
 ACTIVE_CALIBRATION_GAIN = 25.0000  # Default calibration gain for microphone UMIK-2
 

@@ -44,6 +44,7 @@ _display_queue = None  # Global queue for display thread
 def set_display_queue(shared_queue):
     global _display_queue
     _display_queue = shared_queue
+    
 
 def _display_thread():
     """Central OLED display thread for all modes."""
@@ -97,9 +98,10 @@ def third_octave_bands(sample_rate, fft_size):
         bands.append((fc, idx))
     return bands
 
+
 def process_block(band_energies, weighting_curve_db, alpha,
                   smoothed_energy_prev, total_energy_accum,
-                  total_time_accum, block_duration):
+                  total_time_accum, block_duration, delta_db):
     gains = 10 ** (np.array(weighting_curve_db) / 20.0)
     total_energy = np.sum(band_energies * gains**2)
     smoothed_energy = alpha * total_energy + (1 - alpha) * smoothed_energy_prev
@@ -108,26 +110,31 @@ def process_block(band_energies, weighting_curve_db, alpha,
     total_time_accum += block_duration
     return spl_value, smoothed_energy, total_energy_accum, total_time_accum
 
+
 def calc_leq(total_energy_accum, total_time_accum):
     if total_time_accum <= 0:
         return None
     return 10 * np.log10((total_energy_accum / total_time_accum) / (REF_PRESSURE**2) + 1e-12)
 
+
 def load_band_offset():
     path = os.path.join(os.path.dirname(__file__), '..', 'config', 'band_offset_in_dBZ.json')
     with open(os.path.abspath(path), 'r', encoding='utf-8') as f:
         return json.load(f)
+
     
-def load_A_weighting_offset():
-    path = os.path.join(os.path.dirname(__file__), '..', 'config', 'slm_config.json')
+def load_delta_db():
+    path = os.path.join(os.path.dirname(__file__), '..', 'config', 'mic_calibration.json')
     with open(os.path.abspath(path), 'r', encoding='utf-8') as f:
         data = json.load(f)
-        return data["a_weighting_offset"]
+        return data["DELTA_DB"]
+
 
 def get_calibration_gain_for_bands(bands, cal_data):
     band_freqs = [f for f, _ in bands]
     band_cal_dB = np.array([cal_data.get(str(fc), 0.0) for fc in band_freqs])
     return 10 ** (band_cal_dB / 20.0)
+
 
 # ======== Main function ========
 def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=None, display_queue=None, weighting_value=None):
@@ -137,8 +144,7 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
 
     ACTIVE_CALIBRATION_GAIN = load_active_calibration_gain()
     band_offset_dbz = load_band_offset()
-    a_weighting_offset = load_A_weighting_offset()
-    cal_data = {k: v + float(a_weighting_offset) for k, v in band_offset_dbz.items()}
+    delta_db = load_delta_db()
     
     spl_buf = []
 
@@ -165,25 +171,37 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
         nonlocal total_time_A, total_time_C, total_time_Z
 
         audio_data = indata[:, 0] * ACTIVE_CALIBRATION_GAIN
-        windowed = audio_data * np.hanning(len(audio_data))
+
+        w = np.hanning(len(audio_data))
+        U = np.mean(w**2)
+        windowed = audio_data * w
+
         spectrum = np.fft.rfft(windowed)
-        mag = np.abs(spectrum) / (len(windowed) / 2)
-        pressure = mag / np.sqrt(2)
-        calibration_gain = get_calibration_gain_for_bands(bands, cal_data)
+        mag = np.abs(spectrum) / (len(windowed) * np.sqrt(U))
+
+        # double non-DC/Nyquist bins
+        if len(audio_data) % 2 == 0:
+            mag[1:-1] *= 2
+        else:
+            mag[1:] *= 2
+
+        pressure = mag / np.sqrt(2)  # convert to RMS
+
+        calibration_gain = get_calibration_gain_for_bands(bands, band_offset_dbz)
         band_energies = np.array([
             np.sum((pressure[idx] * calibration_gain[i])**2)
             for i, (_, idx) in enumerate(bands)
         ])
-
+        
         # Process for A, C, Z
         LAF, smoothed_A, total_energy_A, total_time_A = process_block(
-            band_energies, A_CURVE_DB, alpha, smoothed_A, total_energy_A, total_time_A, block_duration
+            band_energies, A_CURVE_DB, alpha, smoothed_A, total_energy_A, total_time_A, block_duration, delta_db
         )
         LCF, smoothed_C, total_energy_C, total_time_C = process_block(
-            band_energies, C_CURVE_DB, alpha, smoothed_C, total_energy_C, total_time_C, block_duration
+            band_energies, C_CURVE_DB, alpha, smoothed_C, total_energy_C, total_time_C, block_duration, delta_db
         )
         LZF, smoothed_Z, total_energy_Z, total_time_Z = process_block(
-            band_energies, Z_CURVE_DB, alpha, smoothed_Z, total_energy_Z, total_time_Z, block_duration
+            band_energies, Z_CURVE_DB, alpha, smoothed_Z, total_energy_Z, total_time_Z, block_duration, delta_db
         )
 
         if weighting_value.value == "C":

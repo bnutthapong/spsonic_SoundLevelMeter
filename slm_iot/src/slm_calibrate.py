@@ -4,13 +4,15 @@ import json
 import numpy as np
 import time
 from scipy.signal import get_window
+from scipy.interpolate import interp1d
 import queue
 
 import sounddevice as sd
 from src.slm_cal_SPL_timedomain import A_weighting, process_block
-from src.slm_constant import SAMPLE_RATE, REF_PRESSURE, optionCAL
+from src.slm_constant import SAMPLE_RATE, REF_PRESSURE, optionCAL, REF_DB
 from src.slm_meter import initilize_serialport
 from src.slm_auxiliary_function import wifi_connected
+from src.slm_cal_SPL_FFT import CENTERS, C_CURVE_DB, A_CURVE_DB
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ def save_calibration_result(result_dict, filename=None):
     data.update(result_dict)
     with open(filename, "w") as f:
         json.dump(data, f, indent=4)
+
 
 def calibrate_with_1khz_tone(display_queue=None):
     ser_new = initilize_serialport()
@@ -89,29 +92,32 @@ def calibrate_with_1khz_tone(display_queue=None):
 
     # Measure RMS level
     if optionCAL == 0:
-        logger.info("Using FFT-based A-weighted RMS measurement for calibration.")
-        measured_rms = rms_from_fft_a_weighted(x, SAMPLE_RATE, band_center=1000.0, band_width=100.0)
+        logger.info("Using FFT-based C-weighted RMS measurement for calibration.")
+        measured_rms = rms_from_fft_c_weighted(x, SAMPLE_RATE, band_center=1000.0, band_width=100.0)
+        measured_A_rms = rms_from_fft_a_weighted_table(x, SAMPLE_RATE, band_center=1000.0, band_width=100.0)
     else:
         logger.info("Using time-domain A-weighted RMS measurement for calibration.")
         b_coeffs, a_coeffs = A_weighting(SAMPLE_RATE)
         measured_rms = process_block(recording[:, 0], b_coeffs, a_coeffs)
+        measured_A_rms = measured_rms
+        
     
     logger.info(f"Measured RMS: {measured_rms:.6f} Pa")
-    target_rms = REF_PRESSURE * 10 ** (93.89 / 20)
+    target_rms = REF_PRESSURE * 10 ** (REF_DB / 20)
     
     raw_rms = np.sqrt(np.mean(x**2))
     spl_Z = 20*np.log10(raw_rms / 2e-5)
-    spl_A = 20*np.log10(measured_rms / 2e-5)  # from your A-weighted path
-    logger.info(f"SPL(Z)={spl_Z:.2f} dB, SPL(A)={spl_A:.2f} dB")
+    spl_A = 20*np.log10(measured_A_rms / 2e-5)  # from your A-weighted path
     
     # Compute gain
     CALIBRATION_GAIN_1KHZ = target_rms / measured_rms
     ACTIVE_CALIBRATION_GAIN = CALIBRATION_GAIN_1KHZ
-    
+    DELTA_DB = REF_DB - spl_Z
+    logger.info(f"SPL(Z)={spl_Z:.2f} dB, SPL(A)={spl_A:.2f} dB, DELTA_DB(REF-spl_Z) ={DELTA_DB:.2f} dB")
     logger.info(f"Calibration complete. Gain set to {CALIBRATION_GAIN_1KHZ}")
     
     # Save result
-    save_calibration_result({"CALIBRATION_GAIN_1KHZ": CALIBRATION_GAIN_1KHZ})
+    save_calibration_result({"CALIBRATION_GAIN_1KHZ": CALIBRATION_GAIN_1KHZ, "DELTA_DB": DELTA_DB})
     
     # Final display update
     if display_queue:
@@ -139,76 +145,145 @@ def calibrate_with_sensitivity(mv_per_pa):
     save_calibration_result({"CALIBRATION_GAIN_SENS": CALIBRATION_GAIN_SENS, "mv_per_pa": mv_per_pa})
     
 
-def a_weighting_db(freqs):
+def c_weighting_from_table(freqs):
     """
-    Standard A-weighting in dB re: 1 kHz = 0 dB.
-    Returns array same shape as freqs.
+    Interpolate C-weighting table and convert dB -> linear amplitude.
+    Protect against divide-by-zero for f=0.
     """
-    f = np.array(freqs, dtype=float)
-    f2 = f * f
-    ra_num = (12200.0**2) * (f2**2)
-    ra_den = (f2 + 20.6**2) * np.sqrt((f2 + 107.7**2) * (f2 + 737.9**2)) * (f2 + 12200.0**2)
-    ra = ra_num / np.maximum(ra_den, 1e-30)
-    A = 20.0 * np.log10(ra) + 2.0  # yields ~0 dB at 1 kHz
-    # Handle f=0 exactly (A-weighting -> -inf dB). Force very negative.
-    A = np.where(f == 0, -1000.0, A)
-    return A
+    f = np.asarray(freqs, dtype=float)
+    
+    # Avoid log10(0)
+    f_safe = np.maximum(f, 1e-6)
 
-def a_weighting_linear(freqs):
-    return 10.0 ** (a_weighting_db(freqs) / 20.0)
+    # Interpolate table in log-frequency domain
+    interp_func = interp1d(np.log10(CENTERS), C_CURVE_DB, kind='linear',
+                           bounds_error=False, fill_value="extrapolate")
+    c_db = interp_func(np.log10(f_safe))
 
-def rms_from_fft_a_weighted(signal, fs, band_center=1000.0, band_width=100.0, window_type="hann"):
+    # Convert dB -> linear amplitude
+    W_lin = 10.0 ** (c_db / 20.0)
+    return W_lin
+
+
+# --- FFT-based RMS with table-based C-weighting ---
+def rms_from_fft_c_weighted(signal, fs, band_center=1000.0, band_width=100.0,
+                            window_type="hann"):
     """
-    Compute A-weighted RMS via one-sided FFT with correct window power scaling
-    and narrowband integration around 1 kHz.
-
-    - Applies window to reduce leakage.
-    - Uses Parseval-consistent power scaling.
-    - Applies A-weighting as power weights (|A(f)|^2).
-    - Integrates only bins within [center - width/2, center + width/2].
-
-    Returns RMS in the same units as 'signal'.
+    Compute RMS of signal using FFT and table-based C-weighting.
+    Narrowband integration around 'band_center' +/- band_width/2.
+    
+    Parameters
+    ----------
+    signal : array_like
+        Input time-domain signal.
+    fs : float
+        Sampling rate in Hz.
+    band_center : float
+        Center frequency for narrowband integration (Hz).
+    band_width : float
+        Width of narrowband (Hz).
+    window_type : str
+        Window function for FFT.
+        
+    Returns
+    -------
+    rms : float
+        RMS in the same unit as input (e.g., Pascal)
     """
     x = np.asarray(signal, dtype=np.float64)
     N = len(x)
     if N < 1024:
         raise ValueError("Signal too short for reliable FFT-based RMS; need >= 1024 samples.")
 
-    # Window and its power normalization (U = mean(w^2))
+    # Apply window
     w = get_window(window_type, N, fftbins=True)
     U = np.mean(w**2)  # window power normalization
     xw = x * w
 
-    # One-sided FFT
+    # FFT
     X = np.fft.rfft(xw)
     freqs = np.fft.rfftfreq(N, 1.0 / fs)
-
-    # One-sided power spectrum with Parseval-consistent scaling:
-    # For real x: sum(xw^2) = (1/N) * sum_k |X|^2
-    # Original (unwindowed) power ≈ sum(x^2) = (1/U) * sum(xw^2)
-    # So RMS^2 = (1/N) * sum(x^2) ≈ (1/(N*U)) * (1/N) * sum_k |X|^2
-    # For one-sided spectrum, double non-DC/Nyquist bins.
-    ps_two_sided = (np.abs(X)**2) / (N**2)  # power per bin (two-sided, normalized by N^2)
-    ps_one_sided = ps_two_sided.copy()
+    
+    # One-sided power spectrum
+    ps = (np.abs(X)**2) / (N**2)
     if N % 2 == 0:
-        # Even N has Nyquist bin
-        ps_one_sided[1:-1] *= 2.0
+        ps[1:-1] *= 2.0
     else:
-        ps_one_sided[1:] *= 2.0
+        ps[1:] *= 2.0
 
-    # A-weighting as power weights
-    A_lin = a_weighting_linear(freqs)
-    A_pow = A_lin**2
+    # C-weighting linear amplitude
+    W_lin = c_weighting_from_table(freqs)
+    W_pow = W_lin**2
 
     # Narrowband mask
     half = band_width / 2.0
     mask = (freqs >= (band_center - half)) & (freqs <= (band_center + half))
 
-    # Weighted power in band
-    weighted_power_sum = np.sum(ps_one_sided[mask] * A_pow[mask])
+    # Weighted power in narrowband
+    weighted_power_sum = np.sum(ps[mask] * W_pow[mask])
 
-    # Convert FFT bin-sum to time-domain RMS^2 with window power correction
+    # Correct for window power
     rms_sq = weighted_power_sum / U
     rms = np.sqrt(max(rms_sq, 0.0))
     return rms
 
+
+def a_weighting_from_table(freqs):
+    """
+    Interpolate A-weighting table and convert dB -> linear amplitude.
+    Protect against divide-by-zero for f=0.
+    """
+    f = np.asarray(freqs, dtype=float)
+    
+    # Avoid log10(0)
+    f_safe = np.maximum(f, 1e-6)
+
+    # Interpolate table in log-frequency domain
+    interp_func = interp1d(np.log10(CENTERS), A_CURVE_DB, kind='linear',
+                           bounds_error=False, fill_value="extrapolate")
+    a_db = interp_func(np.log10(f_safe))
+
+    # Convert dB -> linear amplitude
+    W_lin = 10.0 ** (a_db / 20.0)
+    return W_lin
+
+
+def rms_from_fft_a_weighted_table(signal, fs, band_center=1000.0, band_width=100.0,
+                                  window_type="hann"):
+    """
+    Compute RMS of signal using FFT and table-based A-weighting.
+    Narrowband integration around 'band_center' +/- band_width/2.
+    """
+    x = np.asarray(signal, dtype=np.float64)
+    N = len(x)
+    if N < 1024:
+        raise ValueError("Signal too short for reliable FFT-based RMS; need >= 1024 samples.")
+
+    # Window
+    w = get_window(window_type, N, fftbins=True)
+    U = np.mean(w**2)
+    xw = x * w
+
+    # FFT
+    X = np.fft.rfft(xw)
+    freqs = np.fft.rfftfreq(N, 1.0 / fs)
+
+    ps = (np.abs(X)**2) / (N**2)
+    if N % 2 == 0:
+        ps[1:-1] *= 2.0
+    else:
+        ps[1:] *= 2.0
+
+    # Table-based A-weighting linear amplitude
+    W_lin = a_weighting_from_table(freqs)
+    W_pow = W_lin**2
+
+    # Narrowband mask
+    half = band_width / 2.0
+    mask = (freqs >= (band_center - half)) & (freqs <= (band_center + half))
+
+    weighted_power_sum = np.sum(ps[mask] * W_pow[mask])
+
+    rms_sq = weighted_power_sum / U
+    rms = np.sqrt(max(rms_sq, 0.0))
+    return rms

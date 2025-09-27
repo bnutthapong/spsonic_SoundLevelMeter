@@ -4,7 +4,6 @@ import multiprocessing
 from multiprocessing import Manager
 from datetime import datetime
 import RPi.GPIO as GPIO
-import serial
 import subprocess
 import threading
 import queue
