@@ -17,7 +17,7 @@ def setup_logging(log_filename):
     # Configure root logger
     logger = logging.getLogger()
     logger.handlers.clear()  # Ensure no duplicate handlers
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter(
         "%(asctime)s | %(levelname)s | %(name)s | %(message)s"

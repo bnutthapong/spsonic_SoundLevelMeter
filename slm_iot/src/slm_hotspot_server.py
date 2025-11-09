@@ -55,7 +55,7 @@ HTML_FORM = '''
   </style>
 </head>
 <body>
-  <h2>SLM 1.0 Configuration</h2>
+<h2 style="color: #0000CD;">SONITA Configuration</h2>
 <form method="POST" action="/">
   <div class="form-group">
     <label for="node_id">Node ID:</label>
@@ -64,27 +64,39 @@ HTML_FORM = '''
 
   <div class="form-group">
     <label for="wifi_ssid">Wi-Fi SSID:</label>
-    <input type="text" name="wifi_ssid" id="wifi_ssid" value="{{ config.get('wifi_ssid', '') }}" >
+    <input type="text" name="wifi_ssid" id="wifi_ssid" value="{{ config.get('wifi_ssid', '') }}">
   </div>
 
   <div class="form-group">
     <label for="wifi_password">Wi-Fi Password:</label>
-    <input type="text" name="wifi_password" id="wifi_password" value="{{ config.get('wifi_password', '') }}" >
+    <input type="text" name="wifi_password" id="wifi_password" value="{{ config.get('wifi_password', '') }}">
   </div>
 
+  <h2 style="color: #0000CD;">MQTT Settings</h2>
+
   <div class="form-group">
-    <label for="mqtt_broker">MQTT Broker IP:</label>
-    <input type="text" name="mqtt_broker" id="mqtt_broker" value="{{ config.get('mqtt_broker', '') }}" >
+    <label for="mqtt_broker">MQTT Broker:</label>
+    <input type="text" name="mqtt_broker" id="mqtt_broker" value="{{ config.get('mqtt_broker', '') }}">
   </div>
 
   <div class="form-group">
     <label for="mqtt_port">MQTT Port:</label>
-    <input type="number" name="mqtt_port" id="mqtt_port" value="{{ config.get('mqtt_port', 1883) }}" >
+    <input type="number" name="mqtt_port" id="mqtt_port" value="{{ config.get('mqtt_port', 1883) }}">
   </div>
 
   <div class="form-group">
-    <label for="http_endpoint">HTTP Endpoint URL:</label>
-    <input type="text" name="http_endpoint" id="http_endpoint" value="{{ config.get('http_endpoint', '') }}" >
+    <label for="mqtt_topic">MQTT Topic:</label>
+    <input type="text" name="mqtt_topic" id="mqtt_topic" value="{{ config.get('mqtt_topic', '') }}">
+  </div>
+  
+  <div class="form-group">
+    <label for="mqtt_username">MQTT Username:</label>
+    <input type="text" name="mqtt_username" id="mqtt_username" value="{{ config.get('mqtt_username', '') }}">
+  </div>
+  
+  <div class="form-group">
+    <label for="mqtt_password">MQTT Password:</label>
+    <input type="text" name="mqtt_password" id="mqtt_password" value="{{ config.get('mqtt_password', '') }}">
   </div>
 
   <button type="submit">Save Configuration</button>
@@ -92,6 +104,7 @@ HTML_FORM = '''
 </body>
 </html>
 '''
+
 
 def get_current_ssid():
     try:
@@ -170,7 +183,9 @@ def edit_config():
         "wifi_password": "",
         "mqtt_broker": "",
         "mqtt_port": 1883,
-        "http_endpoint": ""
+        "mqtt_topic": "",
+        "mqtt_username": "",
+        "mqtt_password": ""
     }
 
     # Ensure config directory exists

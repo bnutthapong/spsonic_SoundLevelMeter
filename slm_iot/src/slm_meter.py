@@ -30,7 +30,8 @@ def initilize_serialport():
 
 
 def monitor_microphone(time_weighting_value=None, rs232_or_rs485=None,
-                       output_queue=None, display_queue=None, weighting_value=None):
+                        output_queue=None, display_queue=None, weighting_value=None,
+                        mqtt_client=None, mqtt_cfg=None):
     first_init = True # Track first-time initialization
     while True:
         try:
@@ -64,7 +65,7 @@ def monitor_microphone(time_weighting_value=None, rs232_or_rs485=None,
             first_init = False
 
             # Now send SPL values as normal
-            for spl in soundmeter(time_weighting_value, rs232_or_rs485, output_queue, display_queue, weighting_value):
+            for spl in soundmeter(time_weighting_value, rs232_or_rs485, output_queue, display_queue, weighting_value, mqtt_client=mqtt_client, mqtt_cfg=mqtt_cfg):
                 yield spl
 
         except (sd.PortAudioError, sd.CallbackAbort, OSError) as e:

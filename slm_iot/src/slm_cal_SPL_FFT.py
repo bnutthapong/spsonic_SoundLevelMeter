@@ -12,6 +12,7 @@ from src.slm_constant import (
 from src.slm_auxiliary_function import get_alpha, get_l90, wifi_connected
 from src.slm_cal_SPL_timedomain import load_active_calibration_gain
 from src.slm_oled_display import display_slm, display_reboot, display_calibration, display_welcome, display_msg
+from src.slm_mqtt_helper import publish_leq, setup_mqtt
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,10 @@ def _display_thread():
                     display_msg(
                         message=last_data.get("message", "Initializing..."),
                         wifi=last_data.get("wifi", False))
+                elif "ap_mode_prep" in last_data and last_data["ap_mode_prep"]:
+                    display_msg(
+                        message=last_data.get("message", "Preppare AP Mode"),
+                        wifi=last_data.get("wifi", False))
                 else:
                     display_slm(**last_data)
 
@@ -114,7 +119,10 @@ def process_block(band_energies, weighting_curve_db, alpha,
 def calc_leq(total_energy_accum, total_time_accum):
     if total_time_accum <= 0:
         return None
-    return 10 * np.log10((total_energy_accum / total_time_accum) / (REF_PRESSURE**2) + 1e-12)
+
+    leq = 10 * np.log10((total_energy_accum / total_time_accum) / (REF_PRESSURE**2) + 1e-12)
+
+    return round(leq, 1)
 
 
 def load_band_offset():
@@ -137,7 +145,7 @@ def get_calibration_gain_for_bands(bands, cal_data):
 
 
 # ======== Main function ========
-def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=None, display_queue=None, weighting_value=None):
+def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=None, display_queue=None, weighting_value=None, mqtt_client=None, mqtt_cfg=None):
     global ACTIVE_CALIBRATION_GAIN
     if display_queue is None:
         raise ValueError("display_queue must be provided")  # No fallback queue
@@ -162,7 +170,7 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
     
     #print_interval = 0.5  # RS232/RS485 interval
     last_print_time = time.time()
-    connected = wifi_connected()
+    network_connected = wifi_connected()
 
     def callback(indata, frames, time_info, status):
         nonlocal spl_buf, interval_start, last_print_time
@@ -248,6 +256,7 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
             try:
                 output_queue.put_nowait(msg.encode())
             except queue.Full:
+                logger.debug("RS232-RS485 queue Empty")
                 output_queue.get_nowait()
                 output_queue.put_nowait(msg.encode())
             
@@ -259,13 +268,33 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
             lc_eq = calc_leq(total_energy_C, total_time_C)
             lz_eq = calc_leq(total_energy_Z, total_time_Z)
 
-            logger.info(
-                f"Time: {time.strftime('%H:%M:%S')} | SPL(A): {LAF:.1f} dBA "
-                f"| Leq: {leq_val:.1f} dBA | Lmax: {lmax_val:.1f} dBA "
-                f"| Lmin: {lmin_val:.1f} dBA | L90: {l90_val:.1f} dBA "
-                f"| SPL(C): {LCF:.1f} dBC | SPL(Z): {LZF:.1f} dBZ "
-                f"| LCeq: {lc_eq:.1f} dBC | LZeq: {lz_eq:.1f} dBZ"
-            )
+            # logger.info(
+            #     f"Time: {time.strftime('%H:%M:%S')} | SPL(A): {LAF:.1f} dBA "
+            #     f"| Leq: {leq_val:.1f} dBA | Lmax: {lmax_val:.1f} dBA "
+            #     f"| Lmin: {lmin_val:.1f} dBA | L90: {l90_val:.1f} dBA "
+            #     f"| SPL(C): {LCF:.1f} dBC | SPL(Z): {LZF:.1f} dBZ "
+            #     f"| LCeq: {lc_eq:.1f} dBC | LZeq: {lz_eq:.1f} dBZ"
+            # )
+            
+            if network_connected:
+                # --- MQTT publishing ---
+                if mqtt_client is not None and mqtt_cfg is not None:
+                    try:
+                        publish_leq(
+                            timestamp=f"{time.strftime('%H:%M')}",
+                            mqtt_client=mqtt_client,
+                            mqtt_topic=mqtt_cfg['topic'],
+                            node_id=mqtt_cfg.get('node_id', 'slm_node'),
+                            leq_val=leq_val,
+                            lmax_val=lmax_val,
+                            lmin_val=lmin_val,
+                            l90_val=l90_val,
+                            spl_current=display_SPL
+                        )
+                    except Exception:
+                        logger.exception("MQTT publish failed")
+                
+            
             spl_buf.clear()
             total_energy_A = total_energy_C = total_energy_Z = 0.0
             total_time_A = total_time_C = total_time_Z = 0.0
@@ -273,7 +302,7 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
             
         # ---- Push display data (non-blocking) ----
         display_data = {
-            "wifi": connected,
+            "wifi": network_connected,
             "mode": time_weighting_value.value,
             "SPL": display_SPL,
             "Lmin": lmin_val,
@@ -290,6 +319,7 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
                 while True:
                     display_queue.get_nowait()
             except queue.Empty:
+                # logger.debug("display_data queue Empty")
                 pass
             display_queue.put_nowait(display_data)
 
@@ -302,6 +332,7 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
                     spl_dBA = output_queue.get(timeout=1)
                     yield spl_dBA
                 except queue.Empty:
+                    logger.debug("spl_dBA queue Empty")
                     continue
         except KeyboardInterrupt:
             print("\nStopping meter...")

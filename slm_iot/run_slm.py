@@ -15,16 +15,24 @@ from src.slm_logger import setup_logging
 from src.slm_apmode import enable_ap_mode, disable_ap_mode
 from src.slm_cal_SPL_FFT import _display_thread, set_display_queue
 
+from src.slm_mqtt_helper import setup_mqtt
+
 # Shared log filename
 LOG_FILENAME = datetime.now().strftime("slm_%Y%m%d_%H%M%S.log")
 
 logger = logging.getLogger(__name__)
 
 def run_slm(log_filename, output_queue, time_weighting_value, rs232_or_rs485, display_queue, weighting_value):
+    
     setup_logging(log_filename)
-    for spl_dBA in start_meter(time_weighting_value, rs232_or_rs485, output_queue, display_queue, weighting_value):
+    mqtt_client, mqtt_cfg = setup_mqtt()
+    
+    for spl_dBA in start_meter(time_weighting_value, rs232_or_rs485, output_queue, display_queue, weighting_value, mqtt_client=mqtt_client, mqtt_cfg=mqtt_cfg):
         output_queue.put(spl_dBA)  # Send value to parent process
 
+    if mqtt_client:
+        mqtt_client.disconnect()
+    
 # GPIO setup
 SWITCH1_PIN = 17
 SWITCH2_PIN = 27
@@ -153,6 +161,13 @@ if __name__ == "__main__":
                     if ser_port.is_open and rs232_or_rs485.value == "rs485" and rs232_or_rs485.value == "rs232":
                         ser_port.write((':1CONF\r').encode())
                         ser_port.close()
+                    
+                    # Show "Prepare AP Mode" on OLED
+                    try:
+                        display_queue.put_nowait({"ap_mode_prep": True, "wifi": False})
+                    except queue.Full:
+                        display_queue.get_nowait()
+                        display_queue.put_nowait({"ap_mode_prep": True, "wifi": False})
 
                     enable_ap_mode()
                     logger.info("Hotspot mode enabled")
