@@ -8,10 +8,10 @@ import subprocess
 import threading
 import queue
 
-from src.slm_meter import monitor_microphone as start_meter
+from src.slm_meter import monitor_microphone
 from src.slm_meter import initilize_serialport
 from src.slm_calibrate import calibrate_with_1khz_tone
-from src.slm_logger import setup_logging
+from src.slm_logger import setup_logging, setup_data_logging
 from src.slm_apmode import enable_ap_mode, disable_ap_mode
 from src.slm_cal_SPL_FFT import _display_thread, set_display_queue
 
@@ -22,12 +22,10 @@ LOG_FILENAME = datetime.now().strftime("slm_%Y%m%d_%H%M%S.log")
 
 logger = logging.getLogger(__name__)
 
-def run_slm(log_filename, output_queue, time_weighting_value, rs232_or_rs485, display_queue, weighting_value):
-    
-    setup_logging(log_filename)
+def run_slm(output_queue, time_weighting_value, rs232_or_rs485, display_queue, weighting_value):
     mqtt_client, mqtt_cfg = setup_mqtt()
-    
-    for spl_dBA in start_meter(time_weighting_value, rs232_or_rs485, output_queue, display_queue, weighting_value, mqtt_client=mqtt_client, mqtt_cfg=mqtt_cfg):
+    datalogs_dir = setup_data_logging()
+    for spl_dBA in monitor_microphone(time_weighting_value, rs232_or_rs485, output_queue, display_queue, weighting_value, mqtt_client=mqtt_client, mqtt_cfg=mqtt_cfg, datalogs_dir=datalogs_dir):
         output_queue.put(spl_dBA)  # Send value to parent process
 
     if mqtt_client:
@@ -47,14 +45,14 @@ GPIO.setup(SWITCH3_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(SWITCH4_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(SWITCH5_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
-prev_switch_state = GPIO.input(SWITCH3_PIN)
-
-if __name__ == "__main__":
+def main():
+    prev_switch_state = GPIO.input(SWITCH3_PIN)
     multiprocessing.freeze_support()
+    
     setup_logging(LOG_FILENAME)
+    
     logger = logging.getLogger(__name__)
     logger.info("Sound Level Meter (SLM) started.")
-    
 
     # Manager for shared state and queues
     manager = Manager()
@@ -99,7 +97,7 @@ if __name__ == "__main__":
     # Start SLM process
     slm_process = multiprocessing.Process(
         target=run_slm,
-        args=(LOG_FILENAME, output_queue, time_weighting_value, rs232_or_rs485, display_queue, weighting_value)
+        args=(output_queue, time_weighting_value, rs232_or_rs485, display_queue, weighting_value)
     )
     slm_process.start()
 
@@ -252,3 +250,11 @@ if __name__ == "__main__":
             ser_port.close()
         slm_process.terminate()
         slm_process.join()
+            
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nCtrl-C received. Shutting down cleanly...")
+    except Exception:
+        logger.exception("Unhandled exception")

@@ -9,10 +9,10 @@ import queue
 from src.slm_constant import (
     REF_PRESSURE, SAMPLE_RATE, CHUNK_SIZE, LEQ_INTERVAL, TIME_WEIGHTING
 )
-from src.slm_auxiliary_function import get_alpha, get_l90, wifi_connected
+from src.slm_auxiliary_function import get_alpha, get_l90, wifi_connected, write_daily_csv
 from src.slm_cal_SPL_timedomain import load_active_calibration_gain
 from src.slm_oled_display import display_slm, display_reboot, display_calibration, display_welcome, display_msg
-from src.slm_mqtt_helper import publish_leq, setup_mqtt
+from src.slm_mqtt_helper import publish_leq
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ def get_calibration_gain_for_bands(bands, cal_data):
 
 
 # ======== Main function ========
-def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=None, display_queue=None, weighting_value=None, mqtt_client=None, mqtt_cfg=None):
+def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=None, display_queue=None, weighting_value=None, mqtt_client=None, mqtt_cfg=None, datalogs_dir=None):
     global ACTIVE_CALIBRATION_GAIN
     if display_queue is None:
         raise ValueError("display_queue must be provided")  # No fallback queue
@@ -170,7 +170,6 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
     
     #print_interval = 0.5  # RS232/RS485 interval
     last_print_time = time.time()
-    network_connected = wifi_connected()
 
     def callback(indata, frames, time_info, status):
         nonlocal spl_buf, interval_start, last_print_time
@@ -178,6 +177,10 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
         nonlocal total_energy_A, total_energy_C, total_energy_Z
         nonlocal total_time_A, total_time_C, total_time_Z
 
+        # Check wifi status
+        network_connected = False
+        network_connected = wifi_connected()
+        
         audio_data = indata[:, 0] * ACTIVE_CALIBRATION_GAIN
 
         w = np.hanning(len(audio_data))
@@ -256,7 +259,7 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
             try:
                 output_queue.put_nowait(msg.encode())
             except queue.Full:
-                logger.debug("RS232-RS485 queue Empty")
+                # logger.debug("RS232-RS485 queue Empty")
                 output_queue.get_nowait()
                 output_queue.put_nowait(msg.encode())
             
@@ -276,6 +279,19 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
             #     f"| LCeq: {lc_eq:.1f} dBC | LZeq: {lz_eq:.1f} dBZ"
             # )
             
+            # ---- Write daily CSV log ----
+            if datalogs_dir is not None:
+                write_daily_csv(
+                    datalogs_dir,
+                    node_id=mqtt_cfg.get("node_id", "slm_node"),
+                    leq_val=leq_val,
+                    lmax_val=lmax_val,
+                    lmin_val=lmin_val,
+                    l90_val=l90_val,
+                    spl_current=display_SPL
+                )
+            
+            # ---- MQTT publish ----
             if network_connected:
                 # --- MQTT publishing ---
                 if mqtt_client is not None and mqtt_cfg is not None:
@@ -293,14 +309,13 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
                         )
                     except Exception:
                         logger.exception("MQTT publish failed")
-                
             
             spl_buf.clear()
             total_energy_A = total_energy_C = total_energy_Z = 0.0
             total_time_A = total_time_C = total_time_Z = 0.0
             interval_start = now
             
-        # ---- Push display data (non-blocking) ----
+        # ---- Push OLED display data (non-blocking) ----
         display_data = {
             "wifi": network_connected,
             "mode": time_weighting_value.value,
@@ -332,7 +347,7 @@ def soundmeter_FFT(time_weighting_value=None, rs232_or_rs485=None, output_queue=
                     spl_dBA = output_queue.get(timeout=1)
                     yield spl_dBA
                 except queue.Empty:
-                    logger.debug("spl_dBA queue Empty")
+                    # logger.debug("spl_dBA queue Empty")
                     continue
         except KeyboardInterrupt:
             print("\nStopping meter...")

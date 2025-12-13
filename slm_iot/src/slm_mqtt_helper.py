@@ -79,7 +79,7 @@ def publish_leq(timestamp, mqtt_client, mqtt_topic, node_id, leq_val, lmax_val, 
     - spl_current : float, current SPL (A)
     """
     if mqtt_client is None:
-        logger.debug("MQTT client not initialized. Skipping publish.")
+        logger.warning("MQTT client not initialized. Skipping publish.")
         return
 
     payload = {
@@ -92,7 +92,7 @@ def publish_leq(timestamp, mqtt_client, mqtt_topic, node_id, leq_val, lmax_val, 
         "SPL": spl_current
     }
     
-    qos = 0  # Quality of Service level (0, 1, or 2)
+    qos = 1  # Quality of Service level (0, 1, or 2)
 
     try:
         # Publish the message
@@ -108,9 +108,7 @@ def publish_leq(timestamp, mqtt_client, mqtt_topic, node_id, leq_val, lmax_val, 
     except Exception as e:
         logger.exception(f"Failed to publish MQTT payload: {e}")
 
-
-if __name__ == "__main__":
-
+def test_publish():
     try:
         cfg = read_mqtt_config()
         print("Connecting to:", cfg["broker"])
@@ -153,3 +151,6 @@ if __name__ == "__main__":
         print("Runtime error:", err)
     except Exception as e:
         print("Unexpected error:", e)
+
+if __name__ == "__main__":
+    test_publish()

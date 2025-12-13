@@ -4,6 +4,10 @@ import logging
 import numpy as np
 import subprocess
 
+import csv
+import time
+from datetime import datetime
+
 logger = logging.getLogger(__name__)
 
 def get_alpha(time_constant, block_duration):
@@ -11,7 +15,8 @@ def get_alpha(time_constant, block_duration):
 
 
 def get_l90(buffer):
-    return np.percentile(buffer, 10)
+    l90 = np.percentile(buffer, 10)
+    return round(l90, 1)
 
 
 def load_active_calibration_gain():
@@ -31,3 +36,37 @@ def wifi_connected():
         return bool(ssid)
     except Exception:
         return False
+
+def write_daily_csv(datalog_dir, node_id, leq_val, lmax_val, lmin_val, l90_val, spl_current):
+    today = datetime.now().strftime("%Y-%m-%d")
+    filename = f"slm_{today}.csv"
+    filepath = os.path.join(datalog_dir, filename)
+
+    file_exists = os.path.isfile(filepath)
+
+    with open(filepath, mode="a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+
+        # Write header only once per day
+        if not file_exists:
+            writer.writerow([
+                "date",
+                "time",
+                "node_id",
+                "leq",
+                "lmax",
+                "lmin",
+                "l90",
+                "spl_current",
+            ])
+
+        writer.writerow([
+            today,
+            time.strftime("%H:%M"),
+            node_id,
+            leq_val,
+            lmax_val,
+            lmin_val,
+            l90_val,
+            spl_current,
+        ])
