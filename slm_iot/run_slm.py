@@ -144,7 +144,7 @@ def main():
                     ser_port = initilize_serialport()
                     slm_process = multiprocessing.Process(
                         target=run_slm,
-                        args=(LOG_FILENAME, output_queue, time_weighting_value, rs232_or_rs485, display_queue, weighting_value)
+                        args=(output_queue, time_weighting_value, rs232_or_rs485, display_queue, weighting_value)
                     )
                     slm_process.start()
                     pressed_time = None
@@ -255,6 +255,6 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nCtrl-C received. Shutting down cleanly...")
+        logger.info("\nCtrl-C received. Shutting down cleanly...")
     except Exception:
         logger.exception("Unhandled exception")
