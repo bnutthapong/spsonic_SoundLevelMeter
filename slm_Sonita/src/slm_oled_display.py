@@ -1,0 +1,216 @@
+from luma.core.interface.serial import i2c
+from luma.oled.device import ssd1306
+from PIL import Image, ImageDraw, ImageFont
+import logging
+logger = logging.getLogger(__name__)
+
+# Initialize OLED once
+serial = i2c(port=1, address=0x3C)
+device = ssd1306(serial)
+
+# Example adjusted positions
+LINE1_WIFI = 0
+LINE1_Y = 6         # Title
+LINE2_Y = 32        # Mode
+LINE3_Y = 52        # SPL
+
+# Load fonts
+try:
+    font_small = ImageFont.truetype("DejaVuSans.ttf", 10)
+    font_small_plus = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
+    font_medium = ImageFont.truetype("DejaVuSans.ttf", 12)
+    font_medium_plus = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
+    font_large = ImageFont.truetype("DejaVuSans.ttf", 20)
+    font_large_plus = ImageFont.truetype("DejaVuSans-Bold.ttf", 30)
+except:
+    logger.warning("DejaVuSans-Bold.ttf not found. Using default font.")
+    font_small = font_medium = font_large = ImageFont.load_default()
+
+
+# Wi-Fi symbol
+def draw_wifi_icon(draw, x=0, y=LINE1_WIFI, scale=0.5):
+    """
+    Draw a small Wi-Fi symbol at (x, y)
+    scale <1 makes it smaller
+    """
+    # Dot
+    dot_radius = int(2 * scale)
+    draw.ellipse([x, y + int(8*scale), x + 2*dot_radius, y + int(8*scale) + 2*dot_radius], fill=255)
+
+    # Three arcs
+    for i in range(3):
+        radius = int((i + 1) * 6 * scale)
+        bbox = [x - radius + dot_radius, y - radius + int(8*scale) + dot_radius,
+                x + radius + dot_radius, y + radius + int(8*scale) + dot_radius]
+        draw.arc(bbox, start=200, end=340, fill=255, width=1)
+
+
+def display_slm(wifi=True, mode="SLOW", SPL=0, Lmin="-", Lmax="-", Leq="-", weighting_show="A"):
+    # Create blank image
+    image = Image.new("1", (device.width, device.height), "black")
+    draw = ImageDraw.Draw(image)
+
+    # --- Line 1: Wi-Fi + Centered title ---
+    if wifi:
+        draw_wifi_icon(draw, x=110, y=5, scale=0.5)
+
+    # title_text = "SONITA"
+    # bbox = draw.textbbox((5,5), title_text, font=font_medium)
+    # w = bbox[2] - bbox[0]
+    # x_center = (device.width - w)//2
+    # draw.text((x_center, LINE1_Y), title_text, font=font_medium, fill=255)
+
+    # ---------- Line 2: Mode ----------
+    mode_text = str(mode).upper()
+    # bbox = draw.textbbox((0,0), mode_text, font=font_medium)
+    # w = bbox[2] - bbox[0]
+    # draw.text(((device.width - w)//2, LINE1_Y), mode_text, font=font_medium, fill=255)
+    draw.text((5, LINE1_Y), f"SPL {mode_text}", font=font_medium, fill=255)
+
+    # ---------- Line 3: SPL dB A, C, Z ----------
+    
+    spl_text = f"{SPL:.1f} " if isinstance(SPL, (int, float)) else str(SPL)
+    bbox = draw.textbbox((0,0), spl_text, font=font_large_plus)
+    w = bbox[2] - bbox[0]
+    spl_line_y = 36
+    draw.text(((device.width - w)//2 - 15, spl_line_y), spl_text, font=font_large_plus, fill=255)
+    
+    weighting_show = f"dB{weighting_show}"
+    bbox = draw.textbbox((0, 0), weighting_show, font=font_medium_plus)
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    draw.text((128 - w, spl_line_y + 14), weighting_show, font=font_medium_plus, fill=255)
+
+    # # ---------- Line 4: Lmin, Lmax, Leq ----------
+    # # Replace None or empty with '-'
+    # lmin_text = f"{Lmin:.1f}" if isinstance(Lmin, (int, float)) else str(Lmin)
+    # lmax_text = f"{Lmax:.1f}" if isinstance(Lmax, (int, float)) else str(Lmax)
+    # leq_text   = f"{Leq:.1f}" if isinstance(Leq, (int, float)) else str(Leq)
+    # # l_text = f"Lmin:{lmin_text} Lmax:{lmax_text} Leq:{leq_text}"
+    # l_text = f"Lmin:{lmin_text} Lmax:{lmax_text}"
+
+    # bbox = draw.textbbox((0,0), l_text, font=font_medium)
+    # w = bbox[2] - bbox[0]
+    # draw.text(((device.width - w)//2, 54), l_text, font=font_medium, fill=255)
+
+    # Display on OLED
+    device.display(image)
+
+
+def display_calibration(countdown=3, wifi=False):
+    """
+    Display calibration screen on OLED.
+    countdown: integer 3, 2, or 1
+    """
+    # Blank image
+    image = Image.new("1", (device.width, device.height), "black")
+    draw = ImageDraw.Draw(image)
+
+    # ---------- Line 1: Wi-Fi + title ----------
+    if wifi:
+        draw_wifi_icon(draw, x=110, y=5, scale=0.5)
+
+    title_text = "SONITA"
+    bbox = draw.textbbox((0,0), title_text, font=font_medium)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, LINE1_Y), title_text, font=font_medium, fill=255)
+
+    # ---------- Line 2: Calibration instruction ----------
+    calib_text = "Sound 94dB at 1kHz"
+    bbox = draw.textbbox((0,0), calib_text, font=font_medium)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, LINE2_Y), calib_text, font=font_medium, fill=255)
+
+    # ---------- Line 3: Countdown ----------
+    if countdown == -1:
+        countdown = "Rec"
+    elif countdown == -2:    
+        countdown = "Done"
+        
+    countdown_text = str(countdown)
+    bbox = draw.textbbox((0,0), countdown_text, font=font_medium)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, LINE3_Y), countdown_text, font=font_medium, fill=255)
+
+    # Display on OLED
+    device.display(image)
+    
+
+def display_reboot(wifi=False):
+    """
+    Display Reboot screen on OLED.
+    """
+    # Blank image
+    image = Image.new("1", (device.width, device.height), "black")
+    draw = ImageDraw.Draw(image)
+
+    # ---------- Line 1: Wi-Fi + title ----------
+    if wifi:
+        draw_wifi_icon(draw, x=110, y=5, scale=0.5)
+
+    title_text = "SONITA"
+    bbox = draw.textbbox((0,0), title_text, font=font_medium)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, LINE1_Y), title_text, font=font_medium, fill=255)
+
+    # ---------- Line 2: Calibration instruction ----------
+    calib_text = "Rebooting..."
+    bbox = draw.textbbox((0,0), calib_text, font=font_medium)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, LINE2_Y), calib_text, font=font_medium, fill=255)
+
+    # Display on OLED
+    device.display(image)
+    
+
+def display_welcome(wifi=False):
+    """
+    Display Welcome screen on OLED.
+    """
+    # Blank image
+    image = Image.new("1", (device.width, device.height), "black")
+    draw = ImageDraw.Draw(image)
+
+    # ---------- Line 1: Wi-Fi + title ----------
+    if wifi:
+        draw_wifi_icon(draw, x=110, y=5, scale=0.5)
+
+    title_text = "SONITA"
+    bbox = draw.textbbox((0,0), title_text, font=font_medium)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, LINE1_Y), title_text, font=font_medium, fill=255)
+
+    # ---------- Line 2: Calibration instruction ----------
+    calib_text = "Welcome"
+    bbox = draw.textbbox((0,0), calib_text, font=font_medium)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, LINE2_Y), calib_text, font=font_medium, fill=255)
+
+    # Display on OLED
+    device.display(image)
+    
+
+def display_msg(message="msg", wifi=True):
+    """
+    Display message screen on OLED.
+    """
+    # Blank image
+    image = Image.new("1", (device.width, device.height), "black")
+    draw = ImageDraw.Draw(image)
+
+    # ---------- Line 1: Wi-Fi + title ----------
+    if wifi:
+        draw_wifi_icon(draw, x=110, y=5, scale=0.5)
+
+    title_text = "SONITA"
+    bbox = draw.textbbox((0,0), title_text, font=font_medium)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, LINE1_Y), title_text, font=font_medium, fill=255)
+
+    # ---------- Line 2: Calibration instruction ----------
+    bbox = draw.textbbox((0,0), message, font=font_medium)
+    w = bbox[2] - bbox[0]
+    draw.text(((device.width - w)//2, LINE2_Y), message, font=font_medium, fill=255)
+
+    # Display on OLED
+    device.display(image)

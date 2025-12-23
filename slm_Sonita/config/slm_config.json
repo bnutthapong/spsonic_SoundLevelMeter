@@ -1,0 +1,10 @@
+{
+  "node_id": "SLM_01",
+  "wifi_ssid": "None",
+  "wifi_password": null,
+  "mqtt_broker": "",
+  "mqtt_port": 8883,
+  "mqtt_topic": "SoundLevelMeter_IoT",
+  "mqtt_username": "",
+  "mqtt_password": ""
+}
